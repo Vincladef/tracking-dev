@@ -1,5 +1,5 @@
 // 🔗 Mets ici le lien de ton Apps Script déployé
-const apiUrl = "https://script.google.com/macros/s/https://script.google.com/macros/s/AKfycbymCSR4qb7r8f4gbXtOY_A3YpIDKFgBF-_kb8m4KzQO4DW84YJzKvm7E4BILRVbuyanYQ/exec";
+const apiUrl = "https://script.google.com/macros/s/AKfycbx4CidfcjtIRV114PdCOUEUCuY1KKi9z8XwNfK26fvU56vNk-15uvAjdFip8iv2RkWOTg/exec";
 
 // 🔽 Partie 1 – Charger les questions depuis Google Sheets
 fetch(apiUrl)
