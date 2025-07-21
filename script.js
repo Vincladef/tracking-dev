@@ -5,6 +5,7 @@ const apiUrl = "https://script.google.com/macros/s/AKfycbx4CidfcjtIRV114PdCOUEUC
 fetch(apiUrl)
   .then(res => res.json())
   .then(questions => {
+    console.log("✅ Questions reçues :", questions);
     const container = document.getElementById("daily-form");
 
     questions.forEach(q => {
@@ -18,13 +19,13 @@ fetch(apiUrl)
 
       let input;
 
-      if (q.type === "Oui/Non") {
+      if (q.type.toLowerCase().includes("oui")) {
         input = document.createElement("div");
         input.innerHTML = `
           <label class="mr-4"><input type="radio" name="${q.id}" value="Oui"> Oui</label>
           <label><input type="radio" name="${q.id}" value="Non"> Non</label>
         `;
-      } else if (q.type === "Menu déroulant" || q.type === "Likert") {
+      } else if (q.type.toLowerCase().includes("menu") || q.type.toLowerCase().includes("likert")) {
         input = document.createElement("select");
         input.name = q.id;
         input.className = "mt-1 p-2 border rounded w-full";
@@ -34,7 +35,7 @@ fetch(apiUrl)
           option.textContent = opt;
           input.appendChild(option);
         });
-      } else if (q.type === "Texte plus long") {
+      } else if (q.type.toLowerCase().includes("plus long")) {
         input = document.createElement("textarea");
         input.name = q.id;
         input.className = "mt-1 p-2 border rounded w-full";
