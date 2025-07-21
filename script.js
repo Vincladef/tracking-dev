@@ -16,10 +16,36 @@ fetch(apiUrl)
       label.textContent = q.label;
       wrapper.appendChild(label);
 
-      const input = document.createElement("input");
-      input.name = q.id;
-      input.type = "text";
-      input.className = "mt-1 p-2 border rounded w-full";
+      let input;
+
+      if (q.type === "Oui/Non") {
+        input = document.createElement("div");
+        input.innerHTML = `
+          <label class="mr-4"><input type="radio" name="${q.id}" value="Oui"> Oui</label>
+          <label><input type="radio" name="${q.id}" value="Non"> Non</label>
+        `;
+      } else if (q.type === "Menu déroulant" || q.type === "Likert") {
+        input = document.createElement("select");
+        input.name = q.id;
+        input.className = "mt-1 p-2 border rounded w-full";
+        ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
+          const option = document.createElement("option");
+          option.value = opt;
+          option.textContent = opt;
+          input.appendChild(option);
+        });
+      } else if (q.type === "Texte plus long") {
+        input = document.createElement("textarea");
+        input.name = q.id;
+        input.className = "mt-1 p-2 border rounded w-full";
+        input.rows = 4;
+      } else {
+        input = document.createElement("input");
+        input.name = q.id;
+        input.type = "text";
+        input.className = "mt-1 p-2 border rounded w-full";
+      }
+
       wrapper.appendChild(input);
 
       container.appendChild(wrapper);
