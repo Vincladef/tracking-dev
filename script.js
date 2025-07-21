@@ -1,5 +1,5 @@
 // 🔗 Mets ici le lien de ton Apps Script déployé
-const apiUrl = "https://script.google.com/macros/s/AKfycbx4CidfcjtIRV114PdCOUEUCuY1KKi9z8XwNfK26fvU56vNk-15uvAjdFip8iv2RkWOTg/exec";
+const apiUrl = "https://tight-snowflake-cdad.como-denizot.workers.dev";
 
 // 🔽 Partie 1 – Charger les questions depuis Google Sheets
 fetch(apiUrl)
