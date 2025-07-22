@@ -22,7 +22,7 @@ fetch(apiUrl)
       label.textContent = q.label;
       wrapper.appendChild(label);
 
-      // 🔁 Historique formaté
+      // 🔁 Historique visuel
       if (q.history && q.history.length > 0) {
         const historyBlock = document.createElement("div");
         historyBlock.className = "text-sm mb-3";
@@ -41,11 +41,19 @@ fetch(apiUrl)
 
         q.history.forEach(entry => {
           const li = document.createElement("li");
-          const answer = (entry.value || "").toLowerCase().trim();
-          const color = valenceColors[answer] || "text-gray-700";
+          const answerRaw = (entry.value || "").toString().trim().toLowerCase();
+          const color = valenceColors[answerRaw] || "text-gray-700";
 
-          li.innerHTML = `<span class="text-gray-400 mr-2">📅 ${entry.date}</span> 
-                          <span class="${color}">${entry.value}</span>`;
+          const dateSpan = document.createElement("span");
+          dateSpan.className = "text-gray-400 mr-2";
+          dateSpan.textContent = `📅 ${entry.date}`;
+
+          const valueSpan = document.createElement("span");
+          valueSpan.className = color;
+          valueSpan.textContent = entry.value;
+
+          li.appendChild(dateSpan);
+          li.appendChild(valueSpan);
           historyList.appendChild(li);
         });
 
@@ -53,10 +61,12 @@ fetch(apiUrl)
         wrapper.appendChild(historyBlock);
       }
 
-      // 🧩 Input selon type
+      // 🧩 Champ selon le type
       let input;
 
-      if (q.type.toLowerCase().includes("oui")) {
+      const type = q.type.toLowerCase();
+
+      if (type.includes("oui")) {
         input = document.createElement("div");
         input.className = "space-x-6 text-gray-700";
         input.innerHTML = `
@@ -65,7 +75,7 @@ fetch(apiUrl)
         `;
         wrapper.appendChild(input);
 
-      } else if (q.type.toLowerCase().includes("menu") || q.type.toLowerCase().includes("likert")) {
+      } else if (type.includes("menu") || type.includes("likert")) {
         input = document.createElement("select");
         input.name = q.id;
         input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
@@ -77,7 +87,7 @@ fetch(apiUrl)
         });
         wrapper.appendChild(input);
 
-      } else if (q.type.toLowerCase().includes("plus long")) {
+      } else if (type.includes("plus long")) {
         input = document.createElement("textarea");
         input.name = q.id;
         input.rows = 4;
