@@ -11,7 +11,6 @@ const apiUrl = "https://tight-snowflake-cdad.como-denizot.workers.dev";
 fetch(apiUrl)
   .then(res => res.json())
   .then(questions => {
-    console.log("✅ Questions reçues :", questions);
     const container = document.getElementById("daily-form");
 
     questions.forEach(q => {
@@ -23,38 +22,38 @@ fetch(apiUrl)
       label.textContent = q.label;
       wrapper.appendChild(label);
 
-      // 🔁 Historique
-if (q.history && q.history.length > 0) {
-  const historyBlock = document.createElement("div");
-  historyBlock.className = "text-sm mb-3";
+      // 🔁 Historique formaté
+      if (q.history && q.history.length > 0) {
+        const historyBlock = document.createElement("div");
+        historyBlock.className = "text-sm mb-3";
 
-  const historyList = document.createElement("ul");
-  historyList.className = "space-y-1";
+        const historyList = document.createElement("ul");
+        historyList.className = "space-y-1";
 
-  const valenceColors = {
-    "oui": "text-green-700 font-semibold",
-    "plutôt oui": "text-green-600",
-    "moyen": "text-yellow-600",
-    "plutôt non": "text-orange-600",
-    "non": "text-red-600",
-    "pas de réponse": "text-gray-500 italic"
-  };
+        const valenceColors = {
+          "oui": "text-green-700 font-semibold",
+          "plutôt oui": "text-green-600",
+          "moyen": "text-yellow-600",
+          "plutôt non": "text-orange-600",
+          "non": "text-red-600",
+          "pas de réponse": "text-gray-500 italic"
+        };
 
-  q.history.forEach(entry => {
-    const li = document.createElement("li");
-    const answer = (entry.value || "").toLowerCase().trim();
-    const color = valenceColors[answer] || "text-gray-700";
+        q.history.forEach(entry => {
+          const li = document.createElement("li");
+          const answer = (entry.value || "").toLowerCase().trim();
+          const color = valenceColors[answer] || "text-gray-700";
 
-    li.innerHTML = `<span class="text-gray-400 mr-2">📅 ${entry.date}</span> 
-                    <span class="${color}">${entry.value}</span>`;
-    historyList.appendChild(li);
-  });
+          li.innerHTML = `<span class="text-gray-400 mr-2">📅 ${entry.date}</span> 
+                          <span class="${color}">${entry.value}</span>`;
+          historyList.appendChild(li);
+        });
 
-  historyBlock.appendChild(historyList);
-  wrapper.appendChild(historyBlock);
-}
+        historyBlock.appendChild(historyList);
+        wrapper.appendChild(historyBlock);
+      }
 
-
+      // 🧩 Input selon type
       let input;
 
       if (q.type.toLowerCase().includes("oui")) {
@@ -88,7 +87,7 @@ if (q.history && q.history.length > 0) {
         if (q.history && q.history.length > 0) {
           const datalist = document.createElement("datalist");
           datalist.id = `hist-${q.id}`;
-          datalist.innerHTML = q.history.map(val => `<option value="${val}">`).join("");
+          datalist.innerHTML = q.history.map(val => `<option value="${val.value}">`).join("");
           document.body.appendChild(datalist);
           input.setAttribute("list", `hist-${q.id}`);
         }
@@ -103,7 +102,7 @@ if (q.history && q.history.length > 0) {
         if (q.history && q.history.length > 0) {
           const datalist = document.createElement("datalist");
           datalist.id = `hist-${q.id}`;
-          datalist.innerHTML = q.history.map(val => `<option value="${val}">`).join("");
+          datalist.innerHTML = q.history.map(val => `<option value="${val.value}">`).join("");
           document.body.appendChild(datalist);
           input.setAttribute("list", `hist-${q.id}`);
         }
@@ -112,7 +111,7 @@ if (q.history && q.history.length > 0) {
       container.appendChild(wrapper);
     });
 
-    // ✅ Débloque l'affichage après chargement
+    // ✅ Affichage
     document.getElementById("daily-form").classList.remove("hidden");
     document.getElementById("submit-section").classList.remove("hidden");
     const loader = document.getElementById("loader");
