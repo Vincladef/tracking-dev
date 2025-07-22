@@ -3,7 +3,7 @@ const today = new Date();
 const options = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
 const formattedDate = today.toLocaleDateString("fr-FR", options);
 document.getElementById("date-display").textContent =
-  `📅 ${formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}`;
+  `🗕️ ${formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}`;
 
 // 🔗 Lien vers ton backend
 const apiUrl = "https://tight-snowflake-cdad.como-denizot.workers.dev";
@@ -14,24 +14,14 @@ fetch(apiUrl)
   .then(questions => {
     const container = document.getElementById("daily-form");
 
-    // Fonction de normalisation robuste
     const normalize = str =>
       (str || "")
         .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")         // Supprime les accents
-        .replace(/[\u00A0\u202F\u200B]/g, " ")   // Supprime les espaces invisibles
-        .replace(/\s+/g, " ")                    // Réduit les espaces multiples à 1
+        .replace(/[\u0300-\u036f]/g, "")        // accents
+        .replace(/[\u00A0\u202F\u200B]/g, " ")  // espaces invisibles
+        .replace(/\s+/g, " ")                   // espaces multiples
         .toLowerCase()
         .trim();
-
-    const valenceColors = {
-      "oui": "text-green-700 font-semibold",
-      "plutot oui": "text-green-600",
-      "moyen": "text-yellow-600",
-      "plutot non": "text-red-400",
-      "non": "text-red-600 font-semibold",
-      "pas de reponse": "text-gray-500 italic"
-    };
 
     questions.forEach(q => {
       const wrapper = document.createElement("div");
@@ -42,7 +32,7 @@ fetch(apiUrl)
       label.textContent = q.label;
       wrapper.appendChild(label);
 
-      // 🔁 Affichage de l’historique
+      // 🔁 Historique visuel
       if (q.history && q.history.length > 0) {
         const historyBlock = document.createElement("div");
         historyBlock.className = "text-sm mb-3";
@@ -50,15 +40,26 @@ fetch(apiUrl)
         const historyList = document.createElement("ul");
         historyList.className = "space-y-1";
 
+        const valenceColors = {
+          "oui": "text-green-700 font-semibold",
+          "plutot oui": "text-green-600",
+          "plutôt oui": "text-green-600",
+          "moyen": "text-yellow-600",
+          "plutot non": "text-orange-600",
+          "plutôt non": "text-orange-600",
+          "non": "text-red-600",
+          "pas de reponse": "text-gray-500 italic",
+          "pas de réponse": "text-gray-500 italic"
+        };
+
         q.history.forEach(entry => {
           const li = document.createElement("li");
-
-          const normalizedAnswer = normalize(entry.value);
-          const color = valenceColors[normalizedAnswer] || "text-gray-700";
+          const answerRaw = normalize(entry.value);
+          const color = valenceColors[answerRaw] || "text-gray-700";
 
           const dateSpan = document.createElement("span");
           dateSpan.className = "text-gray-400 mr-2";
-          dateSpan.textContent = `📅 ${entry.date}`;
+          dateSpan.textContent = `🗕️ ${entry.date}`;
 
           const valueSpan = document.createElement("span");
           valueSpan.className = color;
@@ -129,6 +130,13 @@ fetch(apiUrl)
         }
       }
 
+      // 📊 Bouton stats individuel
+      const statsBtn = document.createElement("a");
+      statsBtn.href = `stats.html?consigne=${encodeURIComponent(q.id)}`;
+      statsBtn.className = "inline-block mt-3 text-sm text-blue-600 hover:underline";
+      statsBtn.textContent = "📊 Voir les stats de cette consigne";
+      wrapper.appendChild(statsBtn);
+
       container.appendChild(wrapper);
     });
 
@@ -162,4 +170,3 @@ document.getElementById("submitBtn").addEventListener("click", (e) => {
       alert("❌ Erreur d’envoi");
       console.error(err);
     });
-});

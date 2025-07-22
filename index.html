@@ -2,37 +2,123 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Formulaire du jour</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Statistiques – Consigne</title>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
-  <script defer src="script.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body class="bg-gray-100">
+<body class="bg-gray-100 text-gray-800">
 
-  <div class="max-w-3xl mx-auto p-6 mt-8 bg-white rounded-xl shadow">
-    <h1 class="text-2xl font-bold mb-2">📝 Formulaire du jour – Alice</h1>
-    <p id="date-display" class="text-gray-600 mb-6"></p>
+  <div class="max-w-4xl mx-auto p-6 mt-8 bg-white rounded-xl shadow">
+    <h1 id="consigne-title" class="text-2xl font-bold mb-4">📊 Statistiques</h1>
 
-    <!-- ⏳ Chargement -->
-    <div id="loader" class="text-center py-8 text-gray-500 italic">
-      Chargement des questions en cours...
-    </div>
-
-    <!-- 📝 Formulaire principal -->
-    <form id="daily-form" class="space-y-6 hidden">
-      <!-- Les questions seront injectées ici -->
-    </form>
-
-    <!-- ✅ Bouton de soumission -->
-    <div id="submit-section" class="mt-8 text-center hidden">
-      <button id="submitBtn" class="px-6 py-3 bg-green-600 text-white rounded hover:bg-green-700 transition">
-        ✅ Envoyer mes réponses
-      </button>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Répartition des réponses</h2>
+        <canvas id="barChart" class="bg-gray-50 p-4 rounded"></canvas>
+      </div>
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Évolution dans le temps</h2>
+        <canvas id="lineChart" class="bg-gray-50 p-4 rounded"></canvas>
+      </div>
     </div>
   </div>
 
-  <!-- ✅ Tailwind Safelist pour éviter la purge des classes dynamiques -->
-  <div class="hidden text-orange-600 text-green-600 text-yellow-600 text-red-600 text-gray-500 text-gray-700"></div>
+  <script>
+    const apiUrl = "https://tight-snowflake-cdad.como-denizot.workers.dev";
 
+    // 🔍 Récupérer ID de la consigne
+    const params = new URLSearchParams(window.location.search);
+    const consigneId = params.get("consigne");
+
+    if (!consigneId) {
+      document.getElementById("consigne-title").textContent = "❌ Aucune consigne spécifiée.";
+      throw new Error("Missing consigne param");
+    }
+
+    fetch(apiUrl)
+      .then(res => res.json())
+      .then(questions => {
+        const question = questions.find(q => q.id === consigneId);
+
+        if (!question) {
+          document.getElementById("consigne-title").textContent = "❌ Consigne introuvable.";
+          return;
+        }
+
+        document.getElementById("consigne-title").textContent = `📊 Statistiques – ${question.label}`;
+
+        const history = question.history || [];
+
+        // 🌈 Répartition des réponses
+        const counts = {};
+        history.forEach(entry => {
+          const normalized = (entry.value || "Non défini").trim().toLowerCase();
+          counts[normalized] = (counts[normalized] || 0) + 1;
+        });
+
+        const labels = Object.keys(counts);
+        const data = Object.values(counts);
+
+        new Chart(document.getElementById("barChart"), {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [{
+              label: "Réponses",
+              data: data,
+              backgroundColor: "rgba(59, 130, 246, 0.6)",
+              borderRadius: 6,
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              title: { display: false }
+            }
+          }
+        });
+
+        // 📈 Évolution dans le temps
+        const timeMap = {};
+        history.forEach(entry => {
+          const date = entry.date;
+          timeMap[date] = timeMap[date] || {};
+          const val = (entry.value || "non défini").trim().toLowerCase();
+          timeMap[date][val] = (timeMap[date][val] || 0) + 1;
+        });
+
+        const allDates = Object.keys(timeMap).sort();
+        const responseTypes = [...new Set(history.map(e => (e.value || "").toLowerCase()))];
+
+        const datasets = responseTypes.map(type => ({
+          label: type,
+          data: allDates.map(date => timeMap[date]?.[type] || 0),
+          borderWidth: 2,
+          fill: false
+        }));
+
+        new Chart(document.getElementById("lineChart"), {
+          type: "line",
+          data: {
+            labels: allDates,
+            datasets: datasets
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              title: { display: false }
+            },
+            scales: {
+              y: { beginAtZero: true }
+            }
+          }
+        });
+      })
+      .catch(err => {
+        console.error("Erreur lors du chargement des statistiques :", err);
+      });
+  </script>
 </body>
 </html>
