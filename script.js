@@ -24,20 +24,36 @@ fetch(apiUrl)
       wrapper.appendChild(label);
 
       // 🔁 Historique
-      if (q.history && q.history.length > 0) {
-        const historyBlock = document.createElement("div");
-        historyBlock.className = "text-sm text-gray-500 mb-3";
+if (q.history && q.history.length > 0) {
+  const historyBlock = document.createElement("div");
+  historyBlock.className = "text-sm mb-3";
 
-        const isTextType = q.type.toLowerCase().includes("texte") || q.type.toLowerCase().includes("long");
+  const historyList = document.createElement("ul");
+  historyList.className = "space-y-1";
 
-        if (isTextType) {
-          historyBlock.innerHTML = `<span class="italic">Réponses précédentes :</span>`;
-        } else {
-          historyBlock.innerHTML = `<span class="italic">Dernières réponses :</span> <span class="text-gray-700">${q.history.join(" → ")}</span>`;
-        }
+  const valenceColors = {
+    "oui": "text-green-700 font-semibold",
+    "plutôt oui": "text-green-600",
+    "moyen": "text-yellow-600",
+    "plutôt non": "text-orange-600",
+    "non": "text-red-600",
+    "pas de réponse": "text-gray-500 italic"
+  };
 
-        wrapper.appendChild(historyBlock);
-      }
+  q.history.forEach(entry => {
+    const li = document.createElement("li");
+    const answer = (entry.value || "").toLowerCase().trim();
+    const color = valenceColors[answer] || "text-gray-700";
+
+    li.innerHTML = `<span class="text-gray-400 mr-2">📅 ${entry.date}</span> 
+                    <span class="${color}">${entry.value}</span>`;
+    historyList.appendChild(li);
+  });
+
+  historyBlock.appendChild(historyList);
+  wrapper.appendChild(historyBlock);
+}
+
 
       let input;
 
