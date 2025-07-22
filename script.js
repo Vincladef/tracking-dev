@@ -4,8 +4,7 @@ const options = { weekday: "long", day: "numeric", month: "long", year: "numeric
 const formattedDate = today.toLocaleDateString("fr-FR", options);
 document.querySelector("p.text-gray-600").textContent = `📅 ${formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}`;
 
-
-// 🔗 Mets ici le lien de ton Apps Script déployé
+// 🔗 Lien vers ton backend (via Cloudflare Worker ou Apps Script direct)
 const apiUrl = "https://tight-snowflake-cdad.como-denizot.workers.dev";
 
 // 🔽 Partie 1 – Charger les questions depuis Google Sheets
@@ -19,11 +18,33 @@ fetch(apiUrl)
       const wrapper = document.createElement("div");
       wrapper.className = "mb-6";
 
+      // 🏷️ Titre de la question
       const label = document.createElement("label");
       label.className = "block font-medium mb-1";
       label.textContent = q.label;
       wrapper.appendChild(label);
 
+      // 🔁 Affichage de l’historique des réponses
+      if (q.history && q.history.length > 0) {
+        const historyBlock = document.createElement("div");
+        historyBlock.className = "text-sm text-gray-500 mb-2";
+
+        const isTextType = q.type.toLowerCase().includes("texte") || q.type.toLowerCase().includes("long");
+
+        if (isTextType) {
+          // Pour les champs texte : affichage de datalist plus tard
+          historyBlock.innerHTML = `<span class="block mb-1">Réponses précédentes :</span>`;
+          wrapper.appendChild(historyBlock);
+        } else {
+          // Pour les questions oui/non/likert
+          historyBlock.innerHTML = `
+            <span class="block mb-1">Dernières réponses : ${q.history.join(" → ")}</span>
+          `;
+          wrapper.appendChild(historyBlock);
+        }
+      }
+
+      // 🧩 Génération de l’input selon le type
       let input;
 
       if (q.type.toLowerCase().includes("oui")) {
@@ -32,6 +53,8 @@ fetch(apiUrl)
           <label class="mr-4"><input type="radio" name="${q.id}" value="Oui"> Oui</label>
           <label><input type="radio" name="${q.id}" value="Non"> Non</label>
         `;
+        wrapper.appendChild(input);
+
       } else if (q.type.toLowerCase().includes("menu") || q.type.toLowerCase().includes("likert")) {
         input = document.createElement("select");
         input.name = q.id;
@@ -42,19 +65,40 @@ fetch(apiUrl)
           option.textContent = opt;
           input.appendChild(option);
         });
+        wrapper.appendChild(input);
+
       } else if (q.type.toLowerCase().includes("plus long")) {
         input = document.createElement("textarea");
         input.name = q.id;
         input.className = "mt-1 p-2 border rounded w-full";
         input.rows = 4;
+        wrapper.appendChild(input);
+
+        // Ajout du datalist si historique dispo
+        if (q.history && q.history.length > 0) {
+          const datalist = document.createElement("datalist");
+          datalist.id = `hist-${q.id}`;
+          datalist.innerHTML = q.history.map(val => `<option value="${val}">`).join("");
+          wrapper.appendChild(datalist);
+          input.setAttribute("list", `hist-${q.id}`);
+        }
+
       } else {
         input = document.createElement("input");
         input.name = q.id;
         input.type = "text";
         input.className = "mt-1 p-2 border rounded w-full";
-      }
+        wrapper.appendChild(input);
 
-      wrapper.appendChild(input);
+        // Ajout du datalist si historique dispo
+        if (q.history && q.history.length > 0) {
+          const datalist = document.createElement("datalist");
+          datalist.id = `hist-${q.id}`;
+          datalist.innerHTML = q.history.map(val => `<option value="${val}">`).join("");
+          wrapper.appendChild(datalist);
+          input.setAttribute("list", `hist-${q.id}`);
+        }
+      }
 
       container.appendChild(wrapper);
     });
