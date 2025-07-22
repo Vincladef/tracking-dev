@@ -41,13 +41,17 @@ fetch(apiUrl)
         historyList.className = "space-y-1";
 
         const valenceColors = {
-          "oui": "text-green-700 font-semibold",
-          "plutot oui": "text-green-600",
-          "moyen": "text-yellow-600",
-          "plutot non": "text-orange-600",
-          "non": "text-red-600",
-          "pas de reponse": "text-gray-500 italic"
-        };
+  "oui": "text-green-700 font-semibold",
+  "plutot oui": "text-green-600",
+  "plutôt oui": "text-green-600",
+  "moyen": "text-yellow-600",
+  "plutot non": "text-orange-600",
+  "plutôt non": "text-orange-600",
+  "non": "text-red-600",
+  "pas de reponse": "text-gray-500 italic",
+  "pas de réponse": "text-gray-500 italic"
+};
+
 
         q.history.forEach(entry => {
           const li = document.createElement("li");
