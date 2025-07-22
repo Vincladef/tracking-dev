@@ -41,8 +41,9 @@ fetch(apiUrl)
 
         q.history.forEach(entry => {
           const li = document.createElement("li");
-          const answerRaw = (entry.value || "").toString().trim().toLowerCase();
-          const color = valenceColors[answerRaw] || "text-gray-700";
+          const normalize = str => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+const answerRaw = normalize(entry.value || "");
+const color = valenceColors[answerRaw] || "text-gray-700";
 
           const dateSpan = document.createElement("span");
           dateSpan.className = "text-gray-400 mr-2";
@@ -152,3 +153,5 @@ document.getElementById("submitBtn").addEventListener("click", (e) => {
       console.error(err);
     });
 });
+
+
