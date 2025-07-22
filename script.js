@@ -28,7 +28,7 @@ fetch(apiUrl)
       "oui": "text-green-700 font-semibold",
       "plutot oui": "text-green-600",
       "moyen": "text-yellow-600",
-      "plutot non": "text-red-600",
+      "plutot non": "text-red-400",
       "non": "text-red-600",
       "pas de reponse": "text-gray-500 italic"
     };
