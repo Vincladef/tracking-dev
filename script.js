@@ -1,3 +1,10 @@
+// 🔽 Met à jour dynamiquement la date affichée dans la page
+const today = new Date();
+const options = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
+const formattedDate = today.toLocaleDateString("fr-FR", options);
+document.querySelector("p.text-gray-600").textContent = `📅 ${formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}`;
+
+
 // 🔗 Mets ici le lien de ton Apps Script déployé
 const apiUrl = "https://tight-snowflake-cdad.como-denizot.workers.dev";
 
