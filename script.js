@@ -32,25 +32,27 @@ fetch(apiUrl)
 
         const valenceColors = {
           "oui": "text-green-700 font-semibold",
-          "plutôt oui": "text-green-600",
+          "plutot oui": "text-green-600",
           "moyen": "text-yellow-600",
           "plutot non": "text-orange-600",
           "non": "text-red-600",
-          "pas de réponse": "text-gray-500 italic"
+          "pas de reponse": "text-gray-500 italic"
         };
+
+        const normalize = str =>
+          (str || "")
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")        // accents
+            .replace(/[\u00A0\u202F\u200B]/g, " ")   // espaces invisibles
+            .replace(/\s+/g, " ")                   // espaces multiples
+            .toLowerCase()
+            .trim();
 
         q.history.forEach(entry => {
           const li = document.createElement("li");
-          const normalize = str =>
-  str
-    .normalize("NFD")
-    .replace(/[0300-036f]/g, "")          // accents
-    .replace(/[00A0202F200B]/g, " ")     // espaces invisibles
-    .replace(/\s+/g, " ")                      // espaces multiples
-    .toLowerCase()
-    .trim();
-const answerRaw = normalize(entry.value || "");
-const color = valenceColors[answerRaw] || "text-gray-700";
+
+          const answerRaw = normalize(entry.value);
+          const color = valenceColors[answerRaw] || "text-gray-700";
 
           const dateSpan = document.createElement("span");
           dateSpan.className = "text-gray-400 mr-2";
@@ -71,7 +73,6 @@ const color = valenceColors[answerRaw] || "text-gray-700";
 
       // 🧩 Champ selon le type
       let input;
-
       const type = q.type.toLowerCase();
 
       if (type.includes("oui")) {
@@ -160,5 +161,3 @@ document.getElementById("submitBtn").addEventListener("click", (e) => {
       console.error(err);
     });
 });
-
-
