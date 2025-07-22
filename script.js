@@ -2,7 +2,8 @@
 const today = new Date();
 const options = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
 const formattedDate = today.toLocaleDateString("fr-FR", options);
-document.getElementById("date-display").textContent = `📅 ${formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}`;
+document.getElementById("date-display").textContent =
+  `📅 ${formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}`;
 
 // 🔗 Lien vers ton backend
 const apiUrl = "https://tight-snowflake-cdad.como-denizot.workers.dev";
@@ -12,6 +13,15 @@ fetch(apiUrl)
   .then(res => res.json())
   .then(questions => {
     const container = document.getElementById("daily-form");
+
+    const normalize = str =>
+      (str || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")        // accents
+        .replace(/[\u00A0\u202F\u200B]/g, " ")  // espaces invisibles
+        .replace(/\s+/g, " ")                   // espaces multiples
+        .toLowerCase()
+        .trim();
 
     questions.forEach(q => {
       const wrapper = document.createElement("div");
@@ -39,18 +49,8 @@ fetch(apiUrl)
           "pas de reponse": "text-gray-500 italic"
         };
 
-        const normalize = str =>
-          (str || "")
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")        // accents
-            .replace(/[\u00A0\u202F\u200B]/g, " ")   // espaces invisibles
-            .replace(/\s+/g, " ")                   // espaces multiples
-            .toLowerCase()
-            .trim();
-
         q.history.forEach(entry => {
           const li = document.createElement("li");
-
           const answerRaw = normalize(entry.value);
           const color = valenceColors[answerRaw] || "text-gray-700";
 
