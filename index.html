@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Formulaire du jour</title>
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
   <script defer src="script.js"></script>
 </head>
 <body class="bg-gray-100">
@@ -30,6 +30,9 @@
       </button>
     </div>
   </div>
+
+  <!-- ✅ Tailwind Safelist pour éviter la purge des classes dynamiques -->
+  <div class="hidden text-orange-600 text-green-600 text-yellow-600 text-red-600 text-gray-500 text-gray-700"></div>
 
 </body>
 </html>

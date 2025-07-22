@@ -14,14 +14,24 @@ fetch(apiUrl)
   .then(questions => {
     const container = document.getElementById("daily-form");
 
+    // Fonction de normalisation robuste
     const normalize = str =>
       (str || "")
         .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")        // accents
-        .replace(/[\u00A0\u202F\u200B]/g, " ")  // espaces invisibles
-        .replace(/\s+/g, " ")                   // espaces multiples
+        .replace(/[\u0300-\u036f]/g, "")         // Supprime les accents
+        .replace(/[\u00A0\u202F\u200B]/g, " ")   // Supprime les espaces invisibles
+        .replace(/\s+/g, " ")                    // Réduit les espaces multiples à 1
         .toLowerCase()
         .trim();
+
+    const valenceColors = {
+      "oui": "text-green-700 font-semibold",
+      "plutot oui": "text-green-600",
+      "moyen": "text-yellow-600",
+      "plutot non": "text-orange-600",
+      "non": "text-red-600",
+      "pas de reponse": "text-gray-500 italic"
+    };
 
     questions.forEach(q => {
       const wrapper = document.createElement("div");
@@ -32,7 +42,7 @@ fetch(apiUrl)
       label.textContent = q.label;
       wrapper.appendChild(label);
 
-      // 🔁 Historique visuel
+      // 🔁 Affichage de l’historique
       if (q.history && q.history.length > 0) {
         const historyBlock = document.createElement("div");
         historyBlock.className = "text-sm mb-3";
@@ -40,23 +50,11 @@ fetch(apiUrl)
         const historyList = document.createElement("ul");
         historyList.className = "space-y-1";
 
-        const valenceColors = {
-  "oui": "text-green-700 font-semibold",
-  "plutot oui": "text-green-600",
-  "plutôt oui": "text-green-600",
-  "moyen": "text-yellow-600",
-  "plutot non": "text-orange-600",
-  "plutôt non": "text-orange-600",
-  "non": "text-red-600",
-  "pas de reponse": "text-gray-500 italic",
-  "pas de réponse": "text-gray-500 italic"
-};
-
-
         q.history.forEach(entry => {
           const li = document.createElement("li");
-          const answerRaw = normalize(entry.value);
-          const color = valenceColors[answerRaw] || "text-gray-700";
+
+          const normalizedAnswer = normalize(entry.value);
+          const color = valenceColors[normalizedAnswer] || "text-gray-700";
 
           const dateSpan = document.createElement("span");
           dateSpan.className = "text-gray-400 mr-2";
