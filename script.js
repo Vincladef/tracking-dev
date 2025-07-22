@@ -4,7 +4,7 @@ const options = { weekday: "long", day: "numeric", month: "long", year: "numeric
 const formattedDate = today.toLocaleDateString("fr-FR", options);
 document.querySelector("p.text-gray-600").textContent = `📅 ${formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}`;
 
-// 🔗 Lien vers ton backend (via Cloudflare Worker ou Apps Script direct)
+// 🔗 Lien vers ton backend
 const apiUrl = "https://tight-snowflake-cdad.como-denizot.workers.dev";
 
 // 🔽 Partie 1 – Charger les questions depuis Google Sheets
@@ -18,33 +18,27 @@ fetch(apiUrl)
       const wrapper = document.createElement("div");
       wrapper.className = "mb-6";
 
-      // 🏷️ Titre de la question
+      // 🏷️ Affiche le label de la question
       const label = document.createElement("label");
       label.className = "block font-medium mb-1";
       label.textContent = q.label;
       wrapper.appendChild(label);
 
-      // 🔁 Affichage de l’historique des réponses
+      // 🔁 Ajout de l’historique
       if (q.history && q.history.length > 0) {
         const historyBlock = document.createElement("div");
         historyBlock.className = "text-sm text-gray-500 mb-2";
 
-        const isTextType = q.type.toLowerCase().includes("texte") || q.type.toLowerCase().includes("long");
-
-        if (isTextType) {
-          // Pour les champs texte : affichage de datalist plus tard
+        if (["plus long", "texte"].some(t => q.type.toLowerCase().includes(t))) {
           historyBlock.innerHTML = `<span class="block mb-1">Réponses précédentes :</span>`;
           wrapper.appendChild(historyBlock);
         } else {
-          // Pour les questions oui/non/likert
-          historyBlock.innerHTML = `
-            <span class="block mb-1">Dernières réponses : ${q.history.join(" → ")}</span>
-          `;
+          historyBlock.innerHTML = `<span class="block mb-1">Dernières réponses : ${q.history.join(" → ")}</span>`;
           wrapper.appendChild(historyBlock);
         }
       }
 
-      // 🧩 Génération de l’input selon le type
+      // 🧩 Crée l'input selon le type
       let input;
 
       if (q.type.toLowerCase().includes("oui")) {
@@ -67,6 +61,14 @@ fetch(apiUrl)
         });
         wrapper.appendChild(input);
 
+        // Ajout affichage historique
+        if (q.history && q.history.length > 0) {
+          const historyBlock = document.createElement("div");
+          historyBlock.className = "text-sm text-gray-500 mt-1";
+          historyBlock.textContent = "Dernières réponses : " + q.history.join(" → ");
+          wrapper.appendChild(historyBlock);
+        }
+
       } else if (q.type.toLowerCase().includes("plus long")) {
         input = document.createElement("textarea");
         input.name = q.id;
@@ -74,12 +76,11 @@ fetch(apiUrl)
         input.rows = 4;
         wrapper.appendChild(input);
 
-        // Ajout du datalist si historique dispo
         if (q.history && q.history.length > 0) {
           const datalist = document.createElement("datalist");
           datalist.id = `hist-${q.id}`;
           datalist.innerHTML = q.history.map(val => `<option value="${val}">`).join("");
-          wrapper.appendChild(datalist);
+          document.body.appendChild(datalist); // attaché au body
           input.setAttribute("list", `hist-${q.id}`);
         }
 
@@ -90,12 +91,11 @@ fetch(apiUrl)
         input.className = "mt-1 p-2 border rounded w-full";
         wrapper.appendChild(input);
 
-        // Ajout du datalist si historique dispo
         if (q.history && q.history.length > 0) {
           const datalist = document.createElement("datalist");
           datalist.id = `hist-${q.id}`;
           datalist.innerHTML = q.history.map(val => `<option value="${val}">`).join("");
-          wrapper.appendChild(datalist);
+          document.body.appendChild(datalist);
           input.setAttribute("list", `hist-${q.id}`);
         }
       }
@@ -106,7 +106,7 @@ fetch(apiUrl)
 
 // 🔽 Partie 2 – Envoyer les réponses vers Google Sheets
 document.getElementById("submitBtn").addEventListener("click", (e) => {
-  e.preventDefault(); // pour ne pas recharger la page
+  e.preventDefault();
 
   const form = document.getElementById("daily-form");
   const formData = new FormData(form);
