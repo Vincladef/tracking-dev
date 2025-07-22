@@ -34,14 +34,21 @@ fetch(apiUrl)
           "oui": "text-green-700 font-semibold",
           "plutôt oui": "text-green-600",
           "moyen": "text-yellow-600",
-          "plutôt non": "text-orange-600",
+          "plutot non": "text-orange-600",
           "non": "text-red-600",
           "pas de réponse": "text-gray-500 italic"
         };
 
         q.history.forEach(entry => {
           const li = document.createElement("li");
-          const normalize = str => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+          const normalize = str =>
+  str
+    .normalize("NFD")
+    .replace(/[0300-036f]/g, "")          // accents
+    .replace(/[00A0202F200B]/g, " ")     // espaces invisibles
+    .replace(/\s+/g, " ")                      // espaces multiples
+    .toLowerCase()
+    .trim();
 const answerRaw = normalize(entry.value || "");
 const color = valenceColors[answerRaw] || "text-gray-700";
 
