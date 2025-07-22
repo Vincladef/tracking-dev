@@ -2,7 +2,7 @@
 const today = new Date();
 const options = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
 const formattedDate = today.toLocaleDateString("fr-FR", options);
-document.querySelector("p.text-gray-600").textContent = `📅 ${formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}`;
+document.getElementById("date-display").textContent = `📅 ${formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}`;
 
 // 🔗 Lien vers ton backend
 const apiUrl = "https://tight-snowflake-cdad.como-denizot.workers.dev";
@@ -16,43 +16,44 @@ fetch(apiUrl)
 
     questions.forEach(q => {
       const wrapper = document.createElement("div");
-      wrapper.className = "mb-6";
+      wrapper.className = "mb-8 p-4 bg-gray-50 rounded-lg shadow-sm";
 
-      // 🏷️ Affiche le label de la question
       const label = document.createElement("label");
-      label.className = "block font-medium mb-1";
+      label.className = "block text-lg font-semibold mb-2 text-gray-800";
       label.textContent = q.label;
       wrapper.appendChild(label);
 
-      // 🔁 Ajout de l’historique
+      // 🔁 Historique
       if (q.history && q.history.length > 0) {
         const historyBlock = document.createElement("div");
-        historyBlock.className = "text-sm text-gray-500 mb-2";
+        historyBlock.className = "text-sm text-gray-500 mb-3";
 
-        if (["plus long", "texte"].some(t => q.type.toLowerCase().includes(t))) {
-          historyBlock.innerHTML = `<span class="block mb-1">Réponses précédentes :</span>`;
-          wrapper.appendChild(historyBlock);
+        const isTextType = q.type.toLowerCase().includes("texte") || q.type.toLowerCase().includes("long");
+
+        if (isTextType) {
+          historyBlock.innerHTML = `<span class="italic">Réponses précédentes :</span>`;
         } else {
-          historyBlock.innerHTML = `<span class="block mb-1">Dernières réponses : ${q.history.join(" → ")}</span>`;
-          wrapper.appendChild(historyBlock);
+          historyBlock.innerHTML = `<span class="italic">Dernières réponses :</span> <span class="text-gray-700">${q.history.join(" → ")}</span>`;
         }
+
+        wrapper.appendChild(historyBlock);
       }
 
-      // 🧩 Crée l'input selon le type
       let input;
 
       if (q.type.toLowerCase().includes("oui")) {
         input = document.createElement("div");
+        input.className = "space-x-6 text-gray-700";
         input.innerHTML = `
-          <label class="mr-4"><input type="radio" name="${q.id}" value="Oui"> Oui</label>
-          <label><input type="radio" name="${q.id}" value="Non"> Non</label>
+          <label><input type="radio" name="${q.id}" value="Oui" class="mr-1">Oui</label>
+          <label><input type="radio" name="${q.id}" value="Non" class="mr-1">Non</label>
         `;
         wrapper.appendChild(input);
 
       } else if (q.type.toLowerCase().includes("menu") || q.type.toLowerCase().includes("likert")) {
         input = document.createElement("select");
         input.name = q.id;
-        input.className = "mt-1 p-2 border rounded w-full";
+        input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
         ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
           const option = document.createElement("option");
           option.value = opt;
@@ -61,26 +62,18 @@ fetch(apiUrl)
         });
         wrapper.appendChild(input);
 
-        // Ajout affichage historique
-        if (q.history && q.history.length > 0) {
-          const historyBlock = document.createElement("div");
-          historyBlock.className = "text-sm text-gray-500 mt-1";
-          historyBlock.textContent = "Dernières réponses : " + q.history.join(" → ");
-          wrapper.appendChild(historyBlock);
-        }
-
       } else if (q.type.toLowerCase().includes("plus long")) {
         input = document.createElement("textarea");
         input.name = q.id;
-        input.className = "mt-1 p-2 border rounded w-full";
         input.rows = 4;
+        input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
         wrapper.appendChild(input);
 
         if (q.history && q.history.length > 0) {
           const datalist = document.createElement("datalist");
           datalist.id = `hist-${q.id}`;
           datalist.innerHTML = q.history.map(val => `<option value="${val}">`).join("");
-          document.body.appendChild(datalist); // attaché au body
+          document.body.appendChild(datalist);
           input.setAttribute("list", `hist-${q.id}`);
         }
 
@@ -88,7 +81,7 @@ fetch(apiUrl)
         input = document.createElement("input");
         input.name = q.id;
         input.type = "text";
-        input.className = "mt-1 p-2 border rounded w-full";
+        input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
         wrapper.appendChild(input);
 
         if (q.history && q.history.length > 0) {
@@ -102,6 +95,12 @@ fetch(apiUrl)
 
       container.appendChild(wrapper);
     });
+
+    // ✅ Débloque l'affichage après chargement
+    document.getElementById("daily-form").classList.remove("hidden");
+    document.getElementById("submit-section").classList.remove("hidden");
+    const loader = document.getElementById("loader");
+    if (loader) loader.remove();
   });
 
 // 🔽 Partie 2 – Envoyer les réponses vers Google Sheets

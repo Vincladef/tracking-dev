@@ -4,23 +4,32 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Formulaire du jour</title>
-  <script defer src="script.js"></script>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <script defer src="script.js"></script>
 </head>
 <body class="bg-gray-100">
+
   <div class="max-w-3xl mx-auto p-6 mt-8 bg-white rounded-xl shadow">
     <h1 class="text-2xl font-bold mb-2">📝 Formulaire du jour – Alice</h1>
-    <p class="text-gray-600 mb-6"></p>
+    <p id="date-display" class="text-gray-600 mb-6"></p>
 
-    <form id="daily-form" class="space-y-6">
+    <!-- ⏳ Chargement -->
+    <div id="loader" class="text-center py-8 text-gray-500 italic">
+      Chargement des questions en cours...
+    </div>
+
+    <!-- 📝 Formulaire principal -->
+    <form id="daily-form" class="space-y-6 hidden">
       <!-- Les questions seront injectées ici -->
     </form>
 
-    <div class="mt-8 text-center">
-      <button id="submitBtn" class="px-6 py-3 bg-green-600 text-white rounded hover:bg-green-700">
+    <!-- ✅ Bouton de soumission -->
+    <div id="submit-section" class="mt-8 text-center hidden">
+      <button id="submitBtn" class="px-6 py-3 bg-green-600 text-white rounded hover:bg-green-700 transition">
         ✅ Envoyer mes réponses
       </button>
     </div>
   </div>
+
 </body>
 </html>
