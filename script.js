@@ -1,4 +1,4 @@
-// 🔽 Met à jour dynamiquement la date affichée
+// 🔽 Affiche la date du jour (en haut)
 const today = new Date();
 const options = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
 const formattedDate = today.toLocaleDateString("fr-FR", options);
@@ -16,7 +16,6 @@ const urls = {
   jeremy: "https://script.google.com/macros/s/URL_DE_LA_WEBAPP_JEREMY/exec",
   julien: "https://script.google.com/macros/s/URL_DE_LA_WEBAPP_JULIEN/exec",
   vincent: "https://script.google.com/macros/s/URL_DE_LA_WEBAPP_VINCENT/exec",
-  // ajoute d’autres utilisateurs ici…
 };
 
 if (!user || !urls[user]) {
@@ -26,11 +25,28 @@ if (!user || !urls[user]) {
 
 const apiUrl = urls[user];
 
-// ✨ Affichage dynamique du nom dans le titre
+// ✨ Met à jour le titre du formulaire
 document.getElementById("user-title").textContent =
   `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
 
-// 🔽 Charger les questions depuis Google Sheets
+// 📅 Génère le menu des 7 derniers jours
+const dateSelect = document.getElementById("date-select");
+const dateOptions = [...Array(7)].map((_, i) => {
+  const d = new Date();
+  d.setDate(d.getDate() - i);
+  return {
+    value: d.toISOString().split("T")[0], // format: YYYY-MM-DD
+    label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
+  };
+});
+dateOptions.forEach(opt => {
+  const option = document.createElement("option");
+  option.value = opt.value;
+  option.textContent = opt.label.charAt(0).toUpperCase() + opt.label.slice(1);
+  dateSelect.appendChild(option);
+});
+
+// 🔽 Charge les questions depuis Google Sheets
 fetch(apiUrl)
   .then(res => res.json())
   .then(questions => {
@@ -151,6 +167,9 @@ document.getElementById("submitBtn").addEventListener("click", (e) => {
   const form = document.getElementById("daily-form");
   const formData = new FormData(form);
   const entries = Object.fromEntries(formData.entries());
+
+  // 📅 Ajoute la date sélectionnée au payload
+  entries._date = document.getElementById("date-select").value;
 
   fetch(apiUrl, {
     method: "POST",

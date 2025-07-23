@@ -12,7 +12,17 @@
   <div class="max-w-3xl mx-auto p-6 mt-8 bg-white rounded-xl shadow">
     <!-- ✅ Titre dynamique -->
     <h1 id="user-title" class="text-2xl font-bold mb-2">📝 Formulaire du jour</h1>
-    <p id="date-display" class="text-gray-600 mb-6"></p>
+    <p id="date-display" class="text-gray-600 mb-4"></p>
+
+    <!-- 📅 Sélecteur de date -->
+    <div class="mb-6">
+      <label for="date-select" class="block text-sm font-medium text-gray-700 mb-1">
+        📅 Pour quelle date remplis-tu ce formulaire ?
+      </label>
+      <select id="date-select" class="block w-full border border-gray-300 rounded px-3 py-2 bg-white text-gray-800">
+        <!-- Options insérées dynamiquement via script.js -->
+      </select>
+    </div>
 
     <!-- ⏳ Chargement -->
     <div id="loader" class="text-center py-8 text-gray-500 italic">
