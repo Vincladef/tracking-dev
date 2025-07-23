@@ -89,6 +89,14 @@ function loadFormForDate(dateISO) {
           reason.className = "text-sm italic text-green-700 mb-2";
           reason.textContent = q.reason || "✔️ Question temporairement masquée.";
           wrapper.appendChild(reason);
+
+          // ✅ Ajout champ caché pour que le formulaire reste complet
+          const hiddenInput = document.createElement("input");
+          hiddenInput.type = "hidden";
+          hiddenInput.name = q.id;
+          hiddenInput.value = "";
+          wrapper.appendChild(hiddenInput);
+
         } else {
           let input;
           const type = q.type.toLowerCase();
@@ -122,7 +130,6 @@ function loadFormForDate(dateISO) {
             input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
           }
 
-          // Ajout historique en autocomplete si applicable
           if (q.history && q.history.length > 0 && (input.tagName === "TEXTAREA" || input.tagName === "INPUT")) {
             const datalist = document.createElement("datalist");
             datalist.id = `hist-${q.id}`;
