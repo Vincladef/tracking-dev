@@ -17,18 +17,17 @@ if (!user || !urls[user]) {
 
 const apiUrl = urls[user];
 
-// 🎨 Met à jour le titre
+// 🎨 Titre dynamique
 document.getElementById("user-title").textContent =
   `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
 
-// 🗓️ Affiche la date du jour
+// 📅 Date du jour
 const today = new Date();
 const options = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
-const formattedDate = today.toLocaleDateString("fr-FR", options);
 document.getElementById("date-display").textContent =
-  `📅 ${formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1)}`;
+  `📅 ${today.toLocaleDateString("fr-FR", options)}`;
 
-// 🧭 Génère les 7 derniers jours
+// 📆 Liste de dates passées
 const dateSelect = document.getElementById("date-select");
 const pastDates = [...Array(7)].map((_, i) => {
   const d = new Date();
@@ -45,7 +44,7 @@ pastDates.forEach(opt => {
   dateSelect.appendChild(option);
 });
 
-// 🧾 Charge les questions pour une date donnée
+// 📥 Chargement du formulaire
 function loadFormForDate(dateISO) {
   document.getElementById("daily-form").innerHTML = "";
   document.getElementById("submit-section").classList.add("hidden");
@@ -90,13 +89,11 @@ function loadFormForDate(dateISO) {
           reason.textContent = q.reason || "✔️ Question temporairement masquée.";
           wrapper.appendChild(reason);
 
-          // ✅ Ajout champ caché pour que le formulaire reste complet
           const hiddenInput = document.createElement("input");
           hiddenInput.type = "hidden";
           hiddenInput.name = q.id;
           hiddenInput.value = "";
           wrapper.appendChild(hiddenInput);
-
         } else {
           let input;
           const type = q.type.toLowerCase();
@@ -128,14 +125,6 @@ function loadFormForDate(dateISO) {
             input.name = q.id;
             input.type = "text";
             input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-          }
-
-          if (q.history && q.history.length > 0 && (input.tagName === "TEXTAREA" || input.tagName === "INPUT")) {
-            const datalist = document.createElement("datalist");
-            datalist.id = `hist-${q.id}`;
-            datalist.innerHTML = q.history.map(val => `<option value="${val.value}">`).join("");
-            document.body.appendChild(datalist);
-            input.setAttribute("list", `hist-${q.id}`);
           }
 
           wrapper.appendChild(input);
@@ -179,10 +168,10 @@ function loadFormForDate(dateISO) {
     });
 }
 
-// 🌀 Premier chargement = aujourd’hui
+// 🌀 Chargement initial
 loadFormForDate(pastDates[0].value);
 
-// 🔁 Mise à jour quand on change la date
+// 🔁 Changement de date
 dateSelect.addEventListener("change", () => {
   loadFormForDate(dateSelect.value);
 });
