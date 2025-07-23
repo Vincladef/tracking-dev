@@ -86,14 +86,15 @@ function loadFormForDate(dateISO) {
 
           const reason = document.createElement("p");
           reason.className = "text-sm italic text-green-700 mb-2";
-          reason.textContent = q.reason || "⏳ Cette question est temporairement masquée et reviendra plus tard.";
+          reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
           wrapper.appendChild(reason);
 
-          const hiddenInput = document.createElement("input");
-          hiddenInput.type = "hidden";
-          hiddenInput.name = q.id;
-          hiddenInput.value = "";
-          wrapper.appendChild(hiddenInput);
+          // Champ caché pour conserver structure
+          const hidden = document.createElement("input");
+          hidden.type = "hidden";
+          hidden.name = q.id;
+          hidden.value = "";
+          wrapper.appendChild(hidden);
         } else {
           let input;
           const type = q.type.toLowerCase();
@@ -130,6 +131,7 @@ function loadFormForDate(dateISO) {
           wrapper.appendChild(input);
         }
 
+        // 📊 Historique
         if (q.history && q.history.length > 0) {
           const historyBlock = document.createElement("div");
           historyBlock.className = "text-sm mt-3";
