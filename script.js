@@ -82,11 +82,11 @@ function loadFormForDate(dateISO) {
         wrapper.appendChild(label);
 
         if (q.skipped) {
-          wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
+          wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70", "pointer-events-none");
 
           const reason = document.createElement("p");
           reason.className = "text-sm italic text-green-700 mb-2";
-          reason.textContent = q.reason || "✔️ Question temporairement masquée.";
+          reason.textContent = q.reason || "⏳ Cette question est temporairement masquée et reviendra plus tard.";
           wrapper.appendChild(reason);
 
           const hiddenInput = document.createElement("input");
@@ -130,7 +130,6 @@ function loadFormForDate(dateISO) {
           wrapper.appendChild(input);
         }
 
-        // 🔁 Historique
         if (q.history && q.history.length > 0) {
           const historyBlock = document.createElement("div");
           historyBlock.className = "text-sm mt-3";
