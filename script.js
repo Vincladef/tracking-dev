@@ -89,7 +89,6 @@ function loadFormForDate(dateISO) {
           reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
           wrapper.appendChild(reason);
 
-          // Champ caché pour conserver structure
           const hidden = document.createElement("input");
           hidden.type = "hidden";
           hidden.name = q.id;
@@ -157,6 +156,25 @@ function loadFormForDate(dateISO) {
 
           historyBlock.appendChild(historyList);
           wrapper.appendChild(historyBlock);
+        }
+
+        // 🧠 Affichage diagnostic répétition espacée
+        if (q.isSpaced && q.spacedInfo) {
+          const diag = document.createElement("div");
+          diag.className = "mt-3 p-3 rounded-md bg-yellow-50 text-sm border border-yellow-300";
+
+          const last = q.spacedInfo.lastDate || "Aucune";
+          const score = q.spacedInfo.score ?? "?";
+          const next = q.spacedInfo.nextDate || "–";
+
+          diag.innerHTML = `
+            <div><strong>⏱ Répétition espacée</strong></div>
+            <div class="mt-1">Score mémoire : <strong>${score}</strong></div>
+            <div>Dernière réponse prise en compte : <strong>${last}</strong></div>
+            <div>Prochaine apparition prévue : <strong>${next}</strong></div>
+          `;
+
+          wrapper.appendChild(diag);
         }
 
         container.appendChild(wrapper);
