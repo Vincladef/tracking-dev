@@ -15,7 +15,13 @@ let apiUrl = null;
 fetch(`${CONFIG_URL}?user=${user}`)
   .then(res => res.json())
   .then(config => {
+    if (config.error) {
+      alert(`❌ Erreur: ${config.error}`);
+      throw new Error(config.error);
+    }
+
     apiUrl = config.apiurl;
+    console.log("✅ apiUrl récupérée :", apiUrl);
 
     if (!apiUrl) {
       alert("❌ Aucune URL WebApp trouvée pour l’utilisateur.");
@@ -26,23 +32,20 @@ fetch(`${CONFIG_URL}?user=${user}`)
   })
   .catch(err => {
     alert("❌ Erreur lors du chargement de la configuration.");
-    console.error(err);
+    console.error("Erreur attrapée :", err);
   });
 
 
 // 📦 Le cœur de l’application, lancé une fois l’apiUrl récupérée
 function initApp(apiUrl) {
-  // 🎨 Titre dynamique
   document.getElementById("user-title").textContent =
     `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
 
-  // 📅 Date du jour
   const today = new Date();
   const options = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
   document.getElementById("date-display").textContent =
     `📅 ${today.toLocaleDateString("fr-FR", options)}`;
 
-  // 📆 Liste de dates passées
   const dateSelect = document.getElementById("date-select");
   const pastDates = [...Array(7)].map((_, i) => {
     const d = new Date();
@@ -52,6 +55,7 @@ function initApp(apiUrl) {
       label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
     };
   });
+
   pastDates.forEach(opt => {
     const option = document.createElement("option");
     option.value = opt.value;
@@ -59,22 +63,18 @@ function initApp(apiUrl) {
     dateSelect.appendChild(option);
   });
 
-  // 🌀 Chargement initial
   loadFormForDate(pastDates[0].value);
 
-  // 🔁 Changement de date
   dateSelect.addEventListener("change", () => {
     loadFormForDate(dateSelect.value);
   });
 
-  // ✅ Envoi des réponses
   document.getElementById("submitBtn").addEventListener("click", (e) => {
     e.preventDefault();
 
     const form = document.getElementById("daily-form");
     const formData = new FormData(form);
     const entries = Object.fromEntries(formData.entries());
-
     entries._date = dateSelect.value;
 
     fetch(apiUrl, {
@@ -90,7 +90,6 @@ function initApp(apiUrl) {
       });
   });
 
-  // 📥 Chargement du formulaire
   function loadFormForDate(dateISO) {
     document.getElementById("daily-form").innerHTML = "";
     document.getElementById("submit-section").classList.add("hidden");
@@ -176,7 +175,6 @@ function initApp(apiUrl) {
             wrapper.appendChild(input);
           }
 
-          // 📊 Historique
           if (q.history && q.history.length > 0) {
             const historyBlock = document.createElement("div");
             historyBlock.className = "text-sm mt-3";
