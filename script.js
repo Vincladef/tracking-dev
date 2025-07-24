@@ -77,11 +77,14 @@ function initApp(apiUrl) {
     const entries = Object.fromEntries(formData.entries());
     entries._date = dateSelect.value;
 
-    fetch(apiUrl, {
-      method: "POST",
-      body: JSON.stringify(entries),
-      headers: { "Content-Type": "application/json" }
-    })
+    entries.apiUrl = apiUrl;
+
+fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
+  method: "POST",
+  body: JSON.stringify(entries),
+  headers: { "Content-Type": "application/json" }
+})
+
       .then(res => res.text())
       .then(txt => alert("✅ Réponses envoyées !"))
       .catch(err => {
