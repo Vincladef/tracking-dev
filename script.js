@@ -180,7 +180,7 @@ function initApp(apiUrl) {
 
           if (q.history && q.history.length > 0) {
             const historyBlock = document.createElement("div");
-            historyBlock.className = "mt-6 p-4 rounded-lg bg-gray-50";
+            historyBlock.className = "mt-8 px-4 py-5 rounded-xl bg-gray-50";
 
             const title = document.createElement("div");
             title.className = "text-gray-500 mb-2 font-medium";
@@ -188,7 +188,7 @@ function initApp(apiUrl) {
             historyBlock.appendChild(title);
 
             const timelineWrapper = document.createElement("div");
-            timelineWrapper.className = "overflow-x-auto pb-2";
+            timelineWrapper.className = "overflow-x-auto pb-4";
 
             const timeline = document.createElement("div");
             timeline.className = "flex gap-2 w-max";
