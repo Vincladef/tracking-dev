@@ -129,8 +129,9 @@ function initApp(apiUrl) {
 
           const referenceAnswerEntry = q.history?.find(entry => {
             const parts = entry.date.split("/");
-            const entryISO = `${parts[2]}-${parts[1]}-${parts[0]}`;
-            return entryISO === dateISO;
+            const entryDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`).toDateString();
+            const targetDate = new Date(dateISO).toDateString();
+            return entryDate === targetDate;
           });
           const referenceAnswer = referenceAnswerEntry?.value || "";
 
