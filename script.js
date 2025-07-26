@@ -167,7 +167,7 @@ function initApp(apiUrl) {
                 const option = document.createElement("option");
                 option.value = opt;
                 option.textContent = opt;
-                if (opt.toLowerCase() === referenceAnswer.toLowerCase()) option.selected = true;
+                if (opt === referenceAnswer) option.selected = true;
                 input.appendChild(option);
               });
             } else if (type.includes("plus long")) {
@@ -175,13 +175,13 @@ function initApp(apiUrl) {
               input.name = q.id;
               input.rows = 4;
               input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-              input.placeholder = referenceAnswer || "";
+              input.value = referenceAnswer;
             } else {
               input = document.createElement("input");
               input.name = q.id;
               input.type = "text";
               input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-              input.placeholder = referenceAnswer || "";
+              input.value = referenceAnswer;
             }
 
             wrapper.appendChild(input);
