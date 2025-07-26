@@ -128,10 +128,9 @@ function initApp(apiUrl) {
           wrapper.appendChild(label);
 
           const referenceAnswerEntry = q.history?.find(entry => {
-            const parts = entry.date.split("/");
-            const entryDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`).toDateString();
-            const targetDate = new Date(dateISO).toDateString();
-            return entryDate === targetDate;
+            const [dd, mm, yyyy] = entry.date.split("/").map(p => p.trim().padStart(2, "0"));
+            const entryDateISO = `${yyyy}-${mm}-${dd}`;
+            return entryDateISO === dateISO;
           });
           const referenceAnswer = referenceAnswerEntry?.value || "";
 
@@ -168,7 +167,7 @@ function initApp(apiUrl) {
                 const option = document.createElement("option");
                 option.value = opt;
                 option.textContent = opt;
-                if (opt === referenceAnswer) option.selected = true;
+                if (opt.toLowerCase() === referenceAnswer.toLowerCase()) option.selected = true;
                 input.appendChild(option);
               });
             } else if (type.includes("plus long")) {
