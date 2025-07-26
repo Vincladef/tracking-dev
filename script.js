@@ -128,8 +128,8 @@ function initApp(apiUrl) {
           wrapper.appendChild(label);
 
           const referenceAnswerEntry = q.history?.find(entry => {
-            const [dd, mm, yyyy] = entry.date.split("/").map(p => p.trim().padStart(2, "0"));
-            const entryDateISO = `${yyyy}-${mm}-${dd}`;
+            const [dd, mm, yyyy] = entry.date.split("/");
+            const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
             return entryDateISO === dateISO;
           });
           const referenceAnswer = referenceAnswerEntry?.value || "";
