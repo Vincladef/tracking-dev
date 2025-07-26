@@ -40,7 +40,6 @@ function initApp(apiUrl) {
   document.getElementById("user-title").textContent =
     `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
 
-  // Suppression de l'affichage de la date du jour car redondant avec le sélecteur
   const dateDisplay = document.getElementById("date-display");
   if (dateDisplay) dateDisplay.remove();
 
@@ -128,7 +127,12 @@ function initApp(apiUrl) {
           label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
           wrapper.appendChild(label);
 
-          const previousAnswer = q.history && q.history.length > 0 ? q.history[q.history.length - 1].value : "";
+          const referenceAnswerEntry = q.history?.find(entry => {
+            const parts = entry.date.split("/");
+            const entryISO = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            return entryISO === dateISO;
+          });
+          const referenceAnswer = referenceAnswerEntry?.value || "";
 
           if (q.skipped) {
             wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
@@ -152,8 +156,8 @@ function initApp(apiUrl) {
               input = document.createElement("div");
               input.className = "space-x-6 text-gray-700";
               input.innerHTML = `
-                <label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${previousAnswer === "Oui" ? "checked" : ""}>Oui</label>
-                <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${previousAnswer === "Non" ? "checked" : ""}>Non</label>
+                <label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
+                <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>
               `;
             } else if (type.includes("menu") || type.includes("likert")) {
               input = document.createElement("select");
@@ -163,7 +167,7 @@ function initApp(apiUrl) {
                 const option = document.createElement("option");
                 option.value = opt;
                 option.textContent = opt;
-                if (opt === previousAnswer) option.selected = true;
+                if (opt === referenceAnswer) option.selected = true;
                 input.appendChild(option);
               });
             } else if (type.includes("plus long")) {
@@ -171,13 +175,13 @@ function initApp(apiUrl) {
               input.name = q.id;
               input.rows = 4;
               input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-              input.placeholder = previousAnswer || "";
+              input.placeholder = referenceAnswer || "";
             } else {
               input = document.createElement("input");
               input.name = q.id;
               input.type = "text";
               input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-              input.placeholder = previousAnswer || "";
+              input.placeholder = referenceAnswer || "";
             }
 
             wrapper.appendChild(input);
