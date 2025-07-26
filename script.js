@@ -35,8 +35,7 @@ fetch(`${CONFIG_URL}?user=${user}`)
     console.error("Erreur attrapée :", err);
   });
 
-
-// 📦 Le cœur de l’application, lancé une fois l’apiUrl récupérée
+// 📦 Initialisation de l’application
 function initApp(apiUrl) {
   document.getElementById("user-title").textContent =
     `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
@@ -76,15 +75,13 @@ function initApp(apiUrl) {
     const formData = new FormData(form);
     const entries = Object.fromEntries(formData.entries());
     entries._date = dateSelect.value;
-
     entries.apiUrl = apiUrl;
 
-fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
-  method: "POST",
-  body: JSON.stringify(entries),
-  headers: { "Content-Type": "application/json" }
-})
-
+    fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
+      method: "POST",
+      body: JSON.stringify(entries),
+      headers: { "Content-Type": "application/json" }
+    })
       .then(res => res.text())
       .then(txt => alert("✅ Réponses envoyées !"))
       .catch(err => {
@@ -110,15 +107,6 @@ fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
             .replace(/\s+/g, " ")
             .toLowerCase()
             .trim();
-
-        const valenceColors = {
-          "oui": "text-green-700 font-semibold",
-          "plutot oui": "text-green-600",
-          "moyen": "text-yellow-600",
-          "plutot non": "text-red-400",
-          "non": "text-red-600 font-semibold",
-          "pas de reponse": "text-gray-500 italic"
-        };
 
         questions.forEach(q => {
           const wrapper = document.createElement("div");
@@ -178,35 +166,64 @@ fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
             wrapper.appendChild(input);
           }
 
+          // 📊 Mini-graphique historique
           if (q.history && q.history.length > 0) {
             const historyBlock = document.createElement("div");
             historyBlock.className = "text-sm mt-3";
-            const historyList = document.createElement("ul");
-            historyList.className = "space-y-1";
 
-            q.history.forEach(entry => {
-              const li = document.createElement("li");
-              const color = valenceColors[normalize(entry.value)] || "text-gray-700";
+            const timeline = document.createElement("div");
+            timeline.className = "flex gap-2 items-end mt-2";
 
-              const dateSpan = document.createElement("span");
-              dateSpan.className = "text-gray-400 mr-2";
-              dateSpan.textContent = `📅 ${entry.date}`;
+            q.history.slice().reverse().forEach(entry => {
+              const normalized = normalize(entry.value);
+              const colorMap = {
+                "oui": "bg-green-600",
+                "plutot oui": "bg-green-400",
+                "moyen": "bg-yellow-400",
+                "plutot non": "bg-red-300",
+                "non": "bg-red-600",
+                "pas de reponse": "bg-gray-400"
+              };
 
-              const valueSpan = document.createElement("span");
-              valueSpan.className = color;
-              valueSpan.textContent = entry.value;
+              const day = entry.date.split("/")[0];
 
-              li.appendChild(dateSpan);
-              li.appendChild(valueSpan);
-              historyList.appendChild(li);
+              const point = document.createElement("div");
+              point.className = "flex flex-col items-center";
+
+              const dot = document.createElement("div");
+              dot.className = `w-4 h-4 rounded-full ${colorMap[normalized] || "bg-gray-300"}`;
+              dot.title = `${entry.date} – ${entry.value}`;
+
+              const label = document.createElement("span");
+              label.className = "text-xs text-gray-400 mt-1";
+              label.textContent = day;
+
+              point.appendChild(dot);
+              point.appendChild(label);
+              timeline.appendChild(point);
             });
 
-            historyBlock.appendChild(historyList);
+            historyBlock.appendChild(timeline);
             wrapper.appendChild(historyBlock);
           }
 
           container.appendChild(wrapper);
         });
+
+        // ✅ Ajouter la légende des pastilles
+        const legend = document.createElement("div");
+        legend.className = "mt-10 text-sm text-gray-500";
+        legend.innerHTML = `
+          <div class="flex flex-wrap gap-4 items-center">
+            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-green-600"></div><span>Oui</span></div>
+            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-green-400"></div><span>Plutôt oui</span></div>
+            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-yellow-400"></div><span>Moyen</span></div>
+            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-red-300"></div><span>Plutôt non</span></div>
+            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-red-600"></div><span>Non</span></div>
+            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-gray-400"></div><span>Pas de réponse</span></div>
+          </div>
+        `;
+        container.appendChild(legend);
 
         document.getElementById("daily-form").classList.remove("hidden");
         document.getElementById("submit-section").classList.remove("hidden");
