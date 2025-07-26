@@ -128,6 +128,8 @@ function initApp(apiUrl) {
           label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
           wrapper.appendChild(label);
 
+          const previousAnswer = q.history && q.history.length > 0 ? q.history[q.history.length - 1].value : "";
+
           if (q.skipped) {
             wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
             wrapper.style.pointerEvents = "none";
@@ -150,8 +152,8 @@ function initApp(apiUrl) {
               input = document.createElement("div");
               input.className = "space-x-6 text-gray-700";
               input.innerHTML = `
-                <label><input type="radio" name="${q.id}" value="Oui" class="mr-1">Oui</label>
-                <label><input type="radio" name="${q.id}" value="Non" class="mr-1">Non</label>
+                <label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${previousAnswer === "Oui" ? "checked" : ""}>Oui</label>
+                <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${previousAnswer === "Non" ? "checked" : ""}>Non</label>
               `;
             } else if (type.includes("menu") || type.includes("likert")) {
               input = document.createElement("select");
@@ -161,6 +163,7 @@ function initApp(apiUrl) {
                 const option = document.createElement("option");
                 option.value = opt;
                 option.textContent = opt;
+                if (opt === previousAnswer) option.selected = true;
                 input.appendChild(option);
               });
             } else if (type.includes("plus long")) {
@@ -168,11 +171,13 @@ function initApp(apiUrl) {
               input.name = q.id;
               input.rows = 4;
               input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+              input.placeholder = previousAnswer || "";
             } else {
               input = document.createElement("input");
               input.name = q.id;
               input.type = "text";
               input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+              input.placeholder = previousAnswer || "";
             }
 
             wrapper.appendChild(input);
@@ -194,7 +199,7 @@ function initApp(apiUrl) {
             const timeline = document.createElement("div");
             timeline.className = "flex gap-2 w-max";
 
-            q.history.reverse().forEach(entry => {
+            q.history.slice().reverse().forEach(entry => {
               const normalized = normalize(entry.value);
               const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
 
