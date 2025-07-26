@@ -191,7 +191,7 @@ function initApp(apiUrl) {
             const timeline = document.createElement("div");
             timeline.className = "flex gap-2 w-max";
 
-            q.history.slice().reverse().forEach(entry => {
+            q.history.reverse().forEach(entry => {
               const normalized = normalize(entry.value);
               const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
 
