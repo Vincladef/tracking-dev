@@ -185,8 +185,11 @@ function initApp(apiUrl) {
             title.textContent = "📓 Historique récent";
             historyBlock.appendChild(title);
 
+            const timelineWrapper = document.createElement("div");
+            timelineWrapper.className = "overflow-x-auto";
+
             const timeline = document.createElement("div");
-            timeline.className = "flex gap-2 flex-wrap";
+            timeline.className = "flex gap-2 w-max";
 
             q.history.slice().reverse().forEach(entry => {
               const normalized = normalize(entry.value);
@@ -196,13 +199,14 @@ function initApp(apiUrl) {
               const shortDate = `${parts[0]}/${parts[1]}/${parts[2].slice(-2)}`;
 
               const block = document.createElement("div");
-              block.className = `px-3 py-1 rounded-xl text-sm font-medium ${colorClass}`;
+              block.className = `px-3 py-1 rounded-xl text-sm font-medium whitespace-nowrap ${colorClass}`;
               block.textContent = `${shortDate} – ${entry.value}`;
 
               timeline.appendChild(block);
             });
 
-            historyBlock.appendChild(timeline);
+            timelineWrapper.appendChild(timeline);
+            historyBlock.appendChild(timelineWrapper);
             wrapper.appendChild(historyBlock);
           }
 
