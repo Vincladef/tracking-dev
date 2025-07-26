@@ -35,14 +35,15 @@ fetch(`${CONFIG_URL}?user=${user}`)
     console.error("Erreur attrapée :", err);
   });
 
+// 📦 Le cœur de l’application, lancé une fois l’apiUrl récupérée
 function initApp(apiUrl) {
   document.getElementById("user-title").textContent =
-    `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
+    `🗘️ Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
 
   const today = new Date();
   const options = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
   document.getElementById("date-display").textContent =
-    `📅 ${today.toLocaleDateString("fr-FR", options)}`;
+    `🗓️ ${today.toLocaleDateString("fr-FR", options)}`;
 
   const dateSelect = document.getElementById("date-select");
   const pastDates = [...Array(7)].map((_, i) => {
@@ -74,6 +75,7 @@ function initApp(apiUrl) {
     const formData = new FormData(form);
     const entries = Object.fromEntries(formData.entries());
     entries._date = dateSelect.value;
+
     entries.apiUrl = apiUrl;
 
     fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
@@ -81,12 +83,12 @@ function initApp(apiUrl) {
       body: JSON.stringify(entries),
       headers: { "Content-Type": "application/json" }
     })
-    .then(res => res.text())
-    .then(txt => alert("✅ Réponses envoyées !"))
-    .catch(err => {
-      alert("❌ Erreur d’envoi");
-      console.error(err);
-    });
+      .then(res => res.text())
+      .then(txt => alert("✅ Réponses envoyées !"))
+      .catch(err => {
+        alert("❌ Erreur d’envoi");
+        console.error(err);
+      });
   });
 
   function loadFormForDate(dateISO) {
@@ -102,6 +104,7 @@ function initApp(apiUrl) {
           (str || "")
             .normalize("NFD")
             .replace(/[̀-ͯ]/g, "")
+            .replace(/[\u00A0\u202F\u200B]/g, " ")
             .replace(/\s+/g, " ")
             .toLowerCase()
             .trim();
@@ -124,7 +127,20 @@ function initApp(apiUrl) {
           label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
           wrapper.appendChild(label);
 
-          if (!q.skipped) {
+          if (q.skipped) {
+            wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70", "pointer-events-none");
+
+            const reason = document.createElement("p");
+            reason.className = "text-sm italic text-green-700 mb-2";
+            reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
+            wrapper.appendChild(reason);
+
+            const hidden = document.createElement("input");
+            hidden.type = "hidden";
+            hidden.name = q.id;
+            hidden.value = "";
+            wrapper.appendChild(hidden);
+          } else {
             let input;
             const type = q.type.toLowerCase();
 
@@ -145,6 +161,11 @@ function initApp(apiUrl) {
                 option.textContent = opt;
                 input.appendChild(option);
               });
+            } else if (type.includes("plus long")) {
+              input = document.createElement("textarea");
+              input.name = q.id;
+              input.rows = 4;
+              input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
             } else {
               input = document.createElement("input");
               input.name = q.id;
@@ -161,7 +182,7 @@ function initApp(apiUrl) {
 
             const title = document.createElement("div");
             title.className = "text-gray-500 mb-2 font-medium";
-            title.textContent = "📖 Historique récent";
+            title.textContent = "📓 Historique récent";
             historyBlock.appendChild(title);
 
             const timeline = document.createElement("div");
@@ -170,9 +191,14 @@ function initApp(apiUrl) {
             q.history.slice().reverse().forEach(entry => {
               const normalized = normalize(entry.value);
               const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
+
+              const parts = entry.date.split("/");
+              const shortDate = `${parts[0]}/${parts[1]}/${parts[2].slice(-2)}`;
+
               const block = document.createElement("div");
               block.className = `px-3 py-1 rounded-xl text-sm font-medium ${colorClass}`;
-              block.textContent = `${entry.date.split("/")[0]} – ${entry.value}`;
+              block.textContent = `${shortDate} – ${entry.value}`;
+
               timeline.appendChild(block);
             });
 
