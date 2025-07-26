@@ -35,7 +35,6 @@ fetch(`${CONFIG_URL}?user=${user}`)
     console.error("Erreur attrapée :", err);
   });
 
-// 📦 Initialisation de l’application
 function initApp(apiUrl) {
   document.getElementById("user-title").textContent =
     `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
@@ -82,12 +81,12 @@ function initApp(apiUrl) {
       body: JSON.stringify(entries),
       headers: { "Content-Type": "application/json" }
     })
-      .then(res => res.text())
-      .then(txt => alert("✅ Réponses envoyées !"))
-      .catch(err => {
-        alert("❌ Erreur d’envoi");
-        console.error(err);
-      });
+    .then(res => res.text())
+    .then(txt => alert("✅ Réponses envoyées !"))
+    .catch(err => {
+      alert("❌ Erreur d’envoi");
+      console.error(err);
+    });
   });
 
   function loadFormForDate(dateISO) {
@@ -102,11 +101,19 @@ function initApp(apiUrl) {
         const normalize = str =>
           (str || "")
             .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/[\u00A0\u202F\u200B]/g, " ")
+            .replace(/[̀-ͯ]/g, "")
             .replace(/\s+/g, " ")
             .toLowerCase()
             .trim();
+
+        const colorMap = {
+          "oui": "bg-green-100 text-green-800",
+          "plutot oui": "bg-green-50 text-green-700",
+          "moyen": "bg-yellow-100 text-yellow-800",
+          "plutot non": "bg-red-100 text-red-700",
+          "non": "bg-red-200 text-red-900",
+          "pas de reponse": "bg-gray-200 text-gray-700 italic"
+        };
 
         questions.forEach(q => {
           const wrapper = document.createElement("div");
@@ -117,20 +124,7 @@ function initApp(apiUrl) {
           label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
           wrapper.appendChild(label);
 
-          if (q.skipped) {
-            wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70", "pointer-events-none");
-
-            const reason = document.createElement("p");
-            reason.className = "text-sm italic text-green-700 mb-2";
-            reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
-            wrapper.appendChild(reason);
-
-            const hidden = document.createElement("input");
-            hidden.type = "hidden";
-            hidden.name = q.id;
-            hidden.value = "";
-            wrapper.appendChild(hidden);
-          } else {
+          if (!q.skipped) {
             let input;
             const type = q.type.toLowerCase();
 
@@ -151,11 +145,6 @@ function initApp(apiUrl) {
                 option.textContent = opt;
                 input.appendChild(option);
               });
-            } else if (type.includes("plus long")) {
-              input = document.createElement("textarea");
-              input.name = q.id;
-              input.rows = 4;
-              input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
             } else {
               input = document.createElement("input");
               input.name = q.id;
@@ -166,41 +155,25 @@ function initApp(apiUrl) {
             wrapper.appendChild(input);
           }
 
-          // 📊 Mini-graphique historique
           if (q.history && q.history.length > 0) {
             const historyBlock = document.createElement("div");
-            historyBlock.className = "text-sm mt-3";
+            historyBlock.className = "mt-4";
+
+            const title = document.createElement("div");
+            title.className = "text-gray-500 mb-2 font-medium";
+            title.textContent = "📖 Historique récent";
+            historyBlock.appendChild(title);
 
             const timeline = document.createElement("div");
-            timeline.className = "flex gap-2 items-end mt-2";
+            timeline.className = "flex gap-2 flex-wrap";
 
             q.history.slice().reverse().forEach(entry => {
               const normalized = normalize(entry.value);
-              const colorMap = {
-                "oui": "bg-green-600",
-                "plutot oui": "bg-green-400",
-                "moyen": "bg-yellow-400",
-                "plutot non": "bg-red-300",
-                "non": "bg-red-600",
-                "pas de reponse": "bg-gray-400"
-              };
-
-              const day = entry.date.split("/")[0];
-
-              const point = document.createElement("div");
-              point.className = "flex flex-col items-center";
-
-              const dot = document.createElement("div");
-              dot.className = `w-4 h-4 rounded-full ${colorMap[normalized] || "bg-gray-300"}`;
-              dot.title = `${entry.date} – ${entry.value}`;
-
-              const label = document.createElement("span");
-              label.className = "text-xs text-gray-400 mt-1";
-              label.textContent = day;
-
-              point.appendChild(dot);
-              point.appendChild(label);
-              timeline.appendChild(point);
+              const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
+              const block = document.createElement("div");
+              block.className = `px-3 py-1 rounded-xl text-sm font-medium ${colorClass}`;
+              block.textContent = `${entry.date.split("/")[0]} – ${entry.value}`;
+              timeline.appendChild(block);
             });
 
             historyBlock.appendChild(timeline);
@@ -209,21 +182,6 @@ function initApp(apiUrl) {
 
           container.appendChild(wrapper);
         });
-
-        // ✅ Ajouter la légende des pastilles
-        const legend = document.createElement("div");
-        legend.className = "mt-10 text-sm text-gray-500";
-        legend.innerHTML = `
-          <div class="flex flex-wrap gap-4 items-center">
-            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-green-600"></div><span>Oui</span></div>
-            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-green-400"></div><span>Plutôt oui</span></div>
-            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-yellow-400"></div><span>Moyen</span></div>
-            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-red-300"></div><span>Plutôt non</span></div>
-            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-red-600"></div><span>Non</span></div>
-            <div class="flex items-center gap-1"><div class="w-4 h-4 rounded-full bg-gray-400"></div><span>Pas de réponse</span></div>
-          </div>
-        `;
-        container.appendChild(legend);
 
         document.getElementById("daily-form").classList.remove("hidden");
         document.getElementById("submit-section").classList.remove("hidden");
