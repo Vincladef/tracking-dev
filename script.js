@@ -194,7 +194,7 @@ function initApp(apiUrl) {
 
             const title = document.createElement("div");
             title.className = "text-gray-500 mb-3 font-medium";
-            title.textContent = "📓 Historique récent";
+            title.textContent = "📓 Historique";
             historyBlock.appendChild(title);
 
             const timelineWrapper = document.createElement("div");
