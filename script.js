@@ -38,12 +38,11 @@ fetch(`${CONFIG_URL}?user=${user}`)
 // 📦 Le cœur de l’application, lancé une fois l’apiUrl récupérée
 function initApp(apiUrl) {
   document.getElementById("user-title").textContent =
-    `🗘️ Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
+    `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
 
-  const today = new Date();
-  const options = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
-  document.getElementById("date-display").textContent =
-    `🗓️ ${today.toLocaleDateString("fr-FR", options)}`;
+  // Suppression de l'affichage de la date du jour car redondant avec le sélecteur
+  const dateDisplay = document.getElementById("date-display");
+  if (dateDisplay) dateDisplay.remove();
 
   const dateSelect = document.getElementById("date-select");
   dateSelect.classList.add("mb-4");
@@ -180,15 +179,15 @@ function initApp(apiUrl) {
 
           if (q.history && q.history.length > 0) {
             const historyBlock = document.createElement("div");
-            historyBlock.className = "mt-8 px-4 py-5 rounded-xl bg-gray-50";
+            historyBlock.className = "mt-10 px-4 py-6 rounded-xl bg-gray-50";
 
             const title = document.createElement("div");
-            title.className = "text-gray-500 mb-2 font-medium";
-            title.textContent = "📓 Historique";
+            title.className = "text-gray-500 mb-3 font-medium";
+            title.textContent = "📓 Historique récent";
             historyBlock.appendChild(title);
 
             const timelineWrapper = document.createElement("div");
-            timelineWrapper.className = "overflow-x-auto pb-4";
+            timelineWrapper.className = "overflow-x-auto pb-6";
 
             const timeline = document.createElement("div");
             timeline.className = "flex gap-2 w-max";
