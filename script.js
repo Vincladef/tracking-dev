@@ -35,17 +35,17 @@ fetch(`${CONFIG_URL}?user=${user}`)
     console.error("Erreur attrapée :", err);
   });
 
-// 📦 Le cœur de l’application, lancé une fois l’apiUrl récupérée
 function initApp(apiUrl) {
   document.getElementById("user-title").textContent =
-    `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
+    `📋 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
 
-  const dateDisplay = document.getElementById("date-display");
-  if (dateDisplay) dateDisplay.remove();
+  const today = new Date();
+  const options = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
+  // Supprimé car doublon avec le select
+  // document.getElementById("date-display").textContent =
+  //   `🗓️ ${today.toLocaleDateString("fr-FR", options)}`;
 
   const dateSelect = document.getElementById("date-select");
-  dateSelect.classList.add("mb-4");
-
   const pastDates = [...Array(7)].map((_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - i);
@@ -127,16 +127,8 @@ function initApp(apiUrl) {
           label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
           wrapper.appendChild(label);
 
-          const referenceAnswerEntry = q.history?.find(entry => {
-            const [dd, mm, yyyy] = entry.date.split("/");
-            const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-            return entryDateISO === dateISO;
-          });
-          const referenceAnswer = referenceAnswerEntry?.value || "";
-
           if (q.skipped) {
-            wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
-            wrapper.style.pointerEvents = "none";
+            wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70", "pointer-events-none");
 
             const reason = document.createElement("p");
             reason.className = "text-sm italic text-green-700 mb-2";
@@ -152,12 +144,14 @@ function initApp(apiUrl) {
             let input;
             const type = q.type.toLowerCase();
 
+            const currentValue = q.history?.find(h => h.date === dateISO.split("-").reverse().join("/"))?.value || "";
+
             if (type.includes("oui")) {
               input = document.createElement("div");
               input.className = "space-x-6 text-gray-700";
               input.innerHTML = `
-                <label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-                <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>
+                <label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${currentValue === "Oui" ? "checked" : ""}>Oui</label>
+                <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${currentValue === "Non" ? "checked" : ""}>Non</label>
               `;
             } else if (type.includes("menu") || type.includes("likert")) {
               input = document.createElement("select");
@@ -167,7 +161,7 @@ function initApp(apiUrl) {
                 const option = document.createElement("option");
                 option.value = opt;
                 option.textContent = opt;
-                if (opt === referenceAnswer) option.selected = true;
+                if (opt === currentValue) option.selected = true;
                 input.appendChild(option);
               });
             } else if (type.includes("plus long")) {
@@ -175,13 +169,13 @@ function initApp(apiUrl) {
               input.name = q.id;
               input.rows = 4;
               input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-              input.value = referenceAnswer;
+              input.value = currentValue;
             } else {
               input = document.createElement("input");
               input.name = q.id;
               input.type = "text";
               input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-              input.value = referenceAnswer;
+              input.value = currentValue;
             }
 
             wrapper.appendChild(input);
@@ -189,21 +183,27 @@ function initApp(apiUrl) {
 
           if (q.history && q.history.length > 0) {
             const historyBlock = document.createElement("div");
-            historyBlock.className = "mt-6 px-4 py-5 rounded-xl bg-gray-50";
-            historyBlock.style.pointerEvents = "auto";
+            historyBlock.className = "mt-6";
 
             const title = document.createElement("div");
-            title.className = "text-gray-500 mb-3 font-medium";
+            title.className = "text-gray-500 mb-1 font-medium";
             title.textContent = "📓 Historique récent";
             historyBlock.appendChild(title);
 
+            const todayEntry = q.history.find(h => h.date === dateISO.split("-").reverse().join("/"));
+            const currentText = todayEntry ? `Réponse actuelle : ${todayEntry.value}` : "Pas encore répondu aujourd'hui";
+            const current = document.createElement("div");
+            current.className = "text-sm italic text-gray-600 mb-2";
+            current.textContent = currentText;
+            historyBlock.appendChild(current);
+
             const timelineWrapper = document.createElement("div");
-            timelineWrapper.className = "overflow-x-auto pb-4";
+            timelineWrapper.className = "overflow-x-auto";
 
             const timeline = document.createElement("div");
             timeline.className = "flex gap-2 w-max";
 
-            q.history.slice().reverse().forEach(entry => {
+            q.history.reverse().forEach(entry => {
               const normalized = normalize(entry.value);
               const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
 
