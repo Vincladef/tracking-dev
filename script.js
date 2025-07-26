@@ -46,6 +46,8 @@ function initApp(apiUrl) {
     `🗓️ ${today.toLocaleDateString("fr-FR", options)}`;
 
   const dateSelect = document.getElementById("date-select");
+  dateSelect.classList.add("mb-4");
+
   const pastDates = [...Array(7)].map((_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - i);
@@ -178,7 +180,7 @@ function initApp(apiUrl) {
 
           if (q.history && q.history.length > 0) {
             const historyBlock = document.createElement("div");
-            historyBlock.className = "mt-4";
+            historyBlock.className = "mt-6 p-3 rounded-lg bg-gray-50";
 
             const title = document.createElement("div");
             title.className = "text-gray-500 mb-2 font-medium";
