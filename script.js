@@ -129,7 +129,8 @@ function initApp(apiUrl) {
           wrapper.appendChild(label);
 
           if (q.skipped) {
-            wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70", "pointer-events-none");
+            wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
+            wrapper.style.pointerEvents = "none";
 
             const reason = document.createElement("p");
             reason.className = "text-sm italic text-green-700 mb-2";
@@ -180,6 +181,7 @@ function initApp(apiUrl) {
           if (q.history && q.history.length > 0) {
             const historyBlock = document.createElement("div");
             historyBlock.className = "mt-6 px-4 py-5 rounded-xl bg-gray-50";
+            historyBlock.style.pointerEvents = "auto";
 
             const title = document.createElement("div");
             title.className = "text-gray-500 mb-3 font-medium";
