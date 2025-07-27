@@ -35,7 +35,6 @@ fetch(`${CONFIG_URL}?user=${user}`)
     console.error("Erreur attrapée :", err);
   });
 
-// 📦 Le cœur de l’application, lancé une fois l’apiUrl récupérée
 function initApp(apiUrl) {
   document.getElementById("user-title").textContent =
     `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
@@ -75,7 +74,6 @@ function initApp(apiUrl) {
     const formData = new FormData(form);
     const entries = Object.fromEntries(formData.entries());
     entries._date = dateSelect.value;
-
     entries.apiUrl = apiUrl;
 
     fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
@@ -188,38 +186,64 @@ function initApp(apiUrl) {
           }
 
           if (q.history && q.history.length > 0) {
-            const historyBlock = document.createElement("div");
-            historyBlock.className = "mt-6 px-4 py-5 rounded-xl bg-gray-50";
-            historyBlock.style.pointerEvents = "auto";
+            const isTextResponse = q.type.toLowerCase().includes("texte") || q.type.toLowerCase().includes("plus long");
 
-            const title = document.createElement("div");
-            title.className = "text-gray-500 mb-3 font-medium";
-            title.textContent = "📓 Historique";
-            historyBlock.appendChild(title);
+            if (isTextResponse) {
+              const toggleBtn = document.createElement("button");
+              toggleBtn.type = "button";
+              toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
+              toggleBtn.textContent = "📓 Voir l’historique des réponses";
 
-            const timelineWrapper = document.createElement("div");
-            timelineWrapper.className = "overflow-x-auto pb-4";
+              const historyBlock = document.createElement("div");
+              historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
 
-            const timeline = document.createElement("div");
-            timeline.className = "flex gap-2 w-max";
+              q.history.slice().reverse().forEach(entry => {
+                const entryDiv = document.createElement("div");
+                entryDiv.className = "mb-2";
+                entryDiv.innerHTML = `<strong>${entry.date}</strong> – ${entry.value}`;
+                historyBlock.appendChild(entryDiv);
+              });
 
-            q.history.slice().reverse().forEach(entry => {
-              const normalized = normalize(entry.value);
-              const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
+              toggleBtn.addEventListener("click", () => {
+                historyBlock.classList.toggle("hidden");
+              });
 
-              const parts = entry.date.split("/");
-              const shortDate = `${parts[0]}/${parts[1]}/${parts[2].slice(-2)}`;
+              wrapper.appendChild(toggleBtn);
+              wrapper.appendChild(historyBlock);
+            } else {
+              const historyBlock = document.createElement("div");
+              historyBlock.className = "mt-6 px-4 py-5 rounded-xl bg-gray-50";
+              historyBlock.style.pointerEvents = "auto";
 
-              const block = document.createElement("div");
-              block.className = `px-3 py-1 rounded-xl text-sm font-medium whitespace-nowrap ${colorClass}`;
-              block.textContent = `${shortDate} – ${entry.value}`;
+              const title = document.createElement("div");
+              title.className = "text-gray-500 mb-3 font-medium";
+              title.textContent = "📓 Historique";
+              historyBlock.appendChild(title);
 
-              timeline.appendChild(block);
-            });
+              const timelineWrapper = document.createElement("div");
+              timelineWrapper.className = "overflow-x-auto pb-4";
 
-            timelineWrapper.appendChild(timeline);
-            historyBlock.appendChild(timelineWrapper);
-            wrapper.appendChild(historyBlock);
+              const timeline = document.createElement("div");
+              timeline.className = "flex gap-2 w-max";
+
+              q.history.slice().reverse().forEach(entry => {
+                const normalized = normalize(entry.value);
+                const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
+
+                const parts = entry.date.split("/");
+                const shortDate = `${parts[0]}/${parts[1]}/${parts[2].slice(-2)}`;
+
+                const block = document.createElement("div");
+                block.className = `px-3 py-1 rounded-xl text-sm font-medium whitespace-nowrap ${colorClass}`;
+                block.textContent = `${shortDate} – ${entry.value}`;
+
+                timeline.appendChild(block);
+              });
+
+              timelineWrapper.appendChild(timeline);
+              historyBlock.appendChild(timelineWrapper);
+              wrapper.appendChild(historyBlock);
+            }
           }
 
           container.appendChild(wrapper);
