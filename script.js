@@ -90,169 +90,113 @@ function initApp(apiUrl) {
   });
 
   function loadFormForDate(dateISO) {
-    document.getElementById("daily-form").innerHTML = "";
-    document.getElementById("submit-section").classList.add("hidden");
+  document.getElementById("daily-form").innerHTML = "";
+  document.getElementById("submit-section").classList.add("hidden");
 
-    fetch(`${apiUrl}?date=${dateISO}`)
-      .then(res => res.json())
-      .then(questions => {
-        const container = document.getElementById("daily-form");
+  fetch(`${apiUrl}?date=${dateISO}`)
+    .then(res => res.json())
+    .then(questions => {
+      const container = document.getElementById("daily-form");
 
-        const normalize = str =>
-          (str || "")
-            .normalize("NFD")
-            .replace(/[̀-ͯ]/g, "")
-            .replace(/[\u00A0\u202F\u200B]/g, " ")
-            .replace(/\s+/g, " ")
-            .toLowerCase()
-            .trim();
+      questions.forEach(q => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
 
-        const colorMap = {
-          "oui": "bg-green-100 text-green-800",
-          "plutot oui": "bg-green-50 text-green-700",
-          "moyen": "bg-yellow-100 text-yellow-800",
-          "plutot non": "bg-red-100 text-red-700",
-          "non": "bg-red-200 text-red-900",
-          "pas de reponse": "bg-gray-200 text-gray-700 italic"
-        };
+        const label = document.createElement("label");
+        label.className = "block text-lg font-semibold mb-2";
+        label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
+        wrapper.appendChild(label);
 
-        questions.forEach(q => {
-          const wrapper = document.createElement("div");
-          wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
-
-          const label = document.createElement("label");
-          label.className = "block text-lg font-semibold mb-2";
-          label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
-          wrapper.appendChild(label);
-
-          const referenceAnswerEntry = q.history?.find(entry => {
-            const [dd, mm, yyyy] = entry.date.split("/");
-            const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-            return entryDateISO === dateISO;
-          });
-          const referenceAnswer = referenceAnswerEntry?.value || "";
-
-          if (q.skipped) {
-            wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
-            wrapper.style.pointerEvents = "none";
-
-            const reason = document.createElement("p");
-            reason.className = "text-sm italic text-green-700 mb-2";
-            reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
-            wrapper.appendChild(reason);
-
-            const hidden = document.createElement("input");
-            hidden.type = "hidden";
-            hidden.name = q.id;
-            hidden.value = "";
-            wrapper.appendChild(hidden);
-          } else {
-            let input;
-            const type = q.type.toLowerCase();
-
-            if (type.includes("oui")) {
-              input = document.createElement("div");
-              input.className = "space-x-6 text-gray-700";
-              input.innerHTML = `
-                <label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-                <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>
-              `;
-            } else if (type.includes("menu") || type.includes("likert")) {
-              input = document.createElement("select");
-              input.name = q.id;
-              input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-              ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
-                const option = document.createElement("option");
-                option.value = opt;
-                option.textContent = opt;
-                if (opt === referenceAnswer) option.selected = true;
-                input.appendChild(option);
-              });
-            } else if (type.includes("plus long")) {
-              input = document.createElement("textarea");
-              input.name = q.id;
-              input.rows = 4;
-              input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-              input.value = referenceAnswer;
-            } else {
-              input = document.createElement("input");
-              input.name = q.id;
-              input.type = "text";
-              input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-              input.value = referenceAnswer;
-            }
-
-            wrapper.appendChild(input);
-          }
-
-          if (q.history && q.history.length > 0) {
-            const isTextResponse = q.type.toLowerCase().includes("texte") || q.type.toLowerCase().includes("plus long");
-
-            if (isTextResponse) {
-              const toggleBtn = document.createElement("button");
-              toggleBtn.type = "button";
-              toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
-              toggleBtn.textContent = "📓 Voir l’historique des réponses";
-
-              const historyBlock = document.createElement("div");
-              historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
-
-              q.history.slice().reverse().forEach(entry => {
-                const entryDiv = document.createElement("div");
-                entryDiv.className = "mb-2";
-                entryDiv.innerHTML = `<strong>${entry.date}</strong> – ${entry.value}`;
-                historyBlock.appendChild(entryDiv);
-              });
-
-              toggleBtn.addEventListener("click", () => {
-                historyBlock.classList.toggle("hidden");
-              });
-
-              wrapper.appendChild(toggleBtn);
-              wrapper.appendChild(historyBlock);
-            } else {
-              const historyBlock = document.createElement("div");
-              historyBlock.className = "mt-6 px-4 py-5 rounded-xl bg-gray-50";
-              historyBlock.style.pointerEvents = "auto";
-
-              const title = document.createElement("div");
-              title.className = "text-gray-500 mb-3 font-medium";
-              title.textContent = "📓 Historique";
-              historyBlock.appendChild(title);
-
-              const timelineWrapper = document.createElement("div");
-              timelineWrapper.className = "overflow-x-auto pb-4";
-
-              const timeline = document.createElement("div");
-              timeline.className = "flex gap-2 w-max";
-
-              q.history.slice().reverse().forEach(entry => {
-                const normalized = normalize(entry.value);
-                const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
-
-                const parts = entry.date.split("/");
-                const shortDate = `${parts[0]}/${parts[1]}/${parts[2].slice(-2)}`;
-
-                const block = document.createElement("div");
-                block.className = `px-3 py-1 rounded-xl text-sm font-medium whitespace-nowrap ${colorClass}`;
-                block.textContent = `${shortDate} – ${entry.value}`;
-
-                timeline.appendChild(block);
-              });
-
-              timelineWrapper.appendChild(timeline);
-              historyBlock.appendChild(timelineWrapper);
-              wrapper.appendChild(historyBlock);
-            }
-          }
-
-          container.appendChild(wrapper);
+        const referenceAnswerEntry = q.history?.find(entry => {
+          const [dd, mm, yyyy] = entry.date.split("/");
+          const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+          return entryDateISO === dateISO;
         });
+        const referenceAnswer = referenceAnswerEntry?.value || "";
 
-        document.getElementById("daily-form").classList.remove("hidden");
-        document.getElementById("submit-section").classList.remove("hidden");
-        const loader = document.getElementById("loader");
-        if (loader) loader.remove();
+        if (q.skipped) {
+          wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
+          wrapper.style.pointerEvents = "none";
+
+          const reason = document.createElement("p");
+          reason.className = "text-sm italic text-green-700 mb-2";
+          reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
+          wrapper.appendChild(reason);
+
+          const hidden = document.createElement("input");
+          hidden.type = "hidden";
+          hidden.name = q.id;
+          hidden.value = "";
+          wrapper.appendChild(hidden);
+        } else {
+          let input;
+          const type = q.type.toLowerCase();
+
+          if (type.includes("oui")) {
+            input = document.createElement("div");
+            input.className = "space-x-6 text-gray-700";
+            input.innerHTML = `
+              <label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
+              <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>
+            `;
+          } else if (type.includes("menu") || type.includes("likert")) {
+            input = document.createElement("select");
+            input.name = q.id;
+            input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+            ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
+              const option = document.createElement("option");
+              option.value = opt;
+              option.textContent = opt;
+              if (opt === referenceAnswer) option.selected = true;
+              input.appendChild(option);
+            });
+          } else if (type.includes("plus long")) {
+            input = document.createElement("textarea");
+            input.name = q.id;
+            input.rows = 4;
+            input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+            input.value = referenceAnswer;
+          } else {
+            input = document.createElement("input");
+            input.name = q.id;
+            input.type = "text";
+            input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+            input.value = referenceAnswer;
+          }
+
+          wrapper.appendChild(input);
+        }
+
+        if (q.history && q.history.length > 0) {
+          const toggleBtn = document.createElement("button");
+          toggleBtn.type = "button";
+          toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
+          toggleBtn.textContent = "📓 Voir l’historique des réponses";
+
+          const historyBlock = document.createElement("div");
+          historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
+
+          q.history.slice().reverse().forEach(entry => {
+            const entryDiv = document.createElement("div");
+            entryDiv.className = "mb-2";
+            entryDiv.innerHTML = `<strong>${entry.date}</strong> – ${entry.value}`;
+            historyBlock.appendChild(entryDiv);
+          });
+
+          toggleBtn.addEventListener("click", () => {
+            historyBlock.classList.toggle("hidden");
+          });
+
+          wrapper.appendChild(toggleBtn);
+          wrapper.appendChild(historyBlock);
+        }
+
+        container.appendChild(wrapper);
       });
+
+      document.getElementById("daily-form").classList.remove("hidden");
+      document.getElementById("submit-section").classList.remove("hidden");
+      const loader = document.getElementById("loader");
+      if (loader) loader.remove();
+    });
   }
-}
