@@ -239,4 +239,7 @@ function initApp(apiUrl) {
         if (loader) loader.remove();
       });
   }
-}
+} 
+
+
+
