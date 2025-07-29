@@ -195,9 +195,30 @@ function initApp(apiUrl) {
             const historyBlock = document.createElement("div");
             historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
 
+            const normalize = str =>
+              (str || "")
+                .normalize("NFD")
+                .replace(/[̀-ͯ]/g, "")
+                .replace(/[\u00A0\u202F\u200B]/g, " ")
+                .replace(/\s+/g, " ")
+                .toLowerCase()
+                .trim();
+
+            const colorMap = {
+              "oui": "bg-green-100 text-green-800",
+              "plutot oui": "bg-green-50 text-green-700",
+              "moyen": "bg-yellow-100 text-yellow-800",
+              "plutot non": "bg-red-100 text-red-700",
+              "non": "bg-red-200 text-red-900",
+              "pas de reponse": "bg-gray-200 text-gray-700 italic"
+            };
+
             q.history.slice().reverse().forEach(entry => {
+              const normalized = normalize(entry.value);
+              const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
+
               const entryDiv = document.createElement("div");
-              entryDiv.className = "mb-2";
+              entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
               entryDiv.innerHTML = `<strong>${entry.date}</strong> – ${entry.value}`;
               historyBlock.appendChild(entryDiv);
             });
