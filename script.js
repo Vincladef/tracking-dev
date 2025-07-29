@@ -134,7 +134,8 @@ function initApp(apiUrl) {
 
           if (q.skipped) {
             wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
-            wrapper.style.pointerEvents = "none";
+            // Désactiver uniquement les champs de saisie sans bloquer les boutons
+            wrapper.querySelectorAll("input, select, textarea").forEach(el => el.disabled = true);
 
             const reason = document.createElement("p");
             reason.className = "text-sm italic text-green-700 mb-2";
@@ -185,7 +186,7 @@ function initApp(apiUrl) {
             wrapper.appendChild(input);
           }
 
-          // Remplacement de l'affichage de l'historique pour toutes les questions
+          // Affichage de l'historique pour toutes les questions
           if (q.history && q.history.length > 0) {
             const toggleBtn = document.createElement("button");
             toggleBtn.type = "button";
@@ -194,24 +195,6 @@ function initApp(apiUrl) {
 
             const historyBlock = document.createElement("div");
             historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
-
-            const normalize = str =>
-              (str || "")
-                .normalize("NFD")
-                .replace(/[̀-ͯ]/g, "")
-                .replace(/[\u00A0\u202F\u200B]/g, " ")
-                .replace(/\s+/g, " ")
-                .toLowerCase()
-                .trim();
-
-            const colorMap = {
-              "oui": "bg-green-100 text-green-800",
-              "plutot oui": "bg-green-50 text-green-700",
-              "moyen": "bg-yellow-100 text-yellow-800",
-              "plutot non": "bg-red-100 text-red-700",
-              "non": "bg-red-200 text-red-900",
-              "pas de reponse": "bg-gray-200 text-gray-700 italic"
-            };
 
             q.history.slice().reverse().forEach(entry => {
               const normalized = normalize(entry.value);
