@@ -185,65 +185,29 @@ function initApp(apiUrl) {
             wrapper.appendChild(input);
           }
 
+          // Remplacement de l'affichage de l'historique pour toutes les questions
           if (q.history && q.history.length > 0) {
-            const isTextResponse = q.type.toLowerCase().includes("texte") || q.type.toLowerCase().includes("plus long");
+            const toggleBtn = document.createElement("button");
+            toggleBtn.type = "button";
+            toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
+            toggleBtn.textContent = "📓 Voir l’historique des réponses";
 
-            if (isTextResponse) {
-              const toggleBtn = document.createElement("button");
-              toggleBtn.type = "button";
-              toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
-              toggleBtn.textContent = "📓 Voir l’historique des réponses";
+            const historyBlock = document.createElement("div");
+            historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
 
-              const historyBlock = document.createElement("div");
-              historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
+            q.history.slice().reverse().forEach(entry => {
+              const entryDiv = document.createElement("div");
+              entryDiv.className = "mb-2";
+              entryDiv.innerHTML = `<strong>${entry.date}</strong> – ${entry.value}`;
+              historyBlock.appendChild(entryDiv);
+            });
 
-              q.history.slice().reverse().forEach(entry => {
-                const entryDiv = document.createElement("div");
-                entryDiv.className = "mb-2";
-                entryDiv.innerHTML = `<strong>${entry.date}</strong> – ${entry.value}`;
-                historyBlock.appendChild(entryDiv);
-              });
+            toggleBtn.addEventListener("click", () => {
+              historyBlock.classList.toggle("hidden");
+            });
 
-              toggleBtn.addEventListener("click", () => {
-                historyBlock.classList.toggle("hidden");
-              });
-
-              wrapper.appendChild(toggleBtn);
-              wrapper.appendChild(historyBlock);
-            } else {
-              const historyBlock = document.createElement("div");
-              historyBlock.className = "mt-6 px-4 py-5 rounded-xl bg-gray-50";
-              historyBlock.style.pointerEvents = "auto";
-
-              const title = document.createElement("div");
-              title.className = "text-gray-500 mb-3 font-medium";
-              title.textContent = "📓 Historique";
-              historyBlock.appendChild(title);
-
-              const timelineWrapper = document.createElement("div");
-              timelineWrapper.className = "overflow-x-auto pb-4";
-
-              const timeline = document.createElement("div");
-              timeline.className = "flex gap-2 w-max";
-
-              q.history.slice().reverse().forEach(entry => {
-                const normalized = normalize(entry.value);
-                const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
-
-                const parts = entry.date.split("/");
-                const shortDate = `${parts[0]}/${parts[1]}/${parts[2].slice(-2)}`;
-
-                const block = document.createElement("div");
-                block.className = `px-3 py-1 rounded-xl text-sm font-medium whitespace-nowrap ${colorClass}`;
-                block.textContent = `${shortDate} – ${entry.value}`;
-
-                timeline.appendChild(block);
-              });
-
-              timelineWrapper.appendChild(timeline);
-              historyBlock.appendChild(timelineWrapper);
-              wrapper.appendChild(historyBlock);
-            }
+            wrapper.appendChild(toggleBtn);
+            wrapper.appendChild(historyBlock);
           }
 
           container.appendChild(wrapper);
