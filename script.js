@@ -152,7 +152,8 @@ function initApp(apiUrl) {
     if (selectedValue.startsWith("__practice__")) {
       entries._date = "__practice__";
       entries._category = selectedValue.split("::")[1];
-      console.log("✅ [script.js] Mode 'pratique délibérée' détecté. La clé '_date' a été définie sur '__practice__'.");
+      entries.mode = "__practice__"; // <-- AJOUT DE LA CLÉ 'mode'
+      console.log("✅ [script.js] Mode 'pratique délibérée' détecté. Clé '_date' + 'mode' ajoutées.");
     } else {
       entries._date = selectedValue;
       console.log("✅ [script.js] Mode 'quotidien' détecté. La clé '_date' a été définie sur :", selectedValue);
