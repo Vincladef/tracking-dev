@@ -1,4 +1,4 @@
-// 📁 script.js - Complet et mis à jour pour la pratique délibérée en bas du menu
+// 📁 script.js - Complet et mis à jour pour la pratique délibérée avec sélection de catégorie
 // 🧠 Avec ajout de logs de débogage
 
 // 🧑 Identifier l’utilisateur depuis l’URL
@@ -55,7 +55,14 @@ function initApp(apiUrl) {
   const dateSelect = document.getElementById("date-select");
   dateSelect.classList.add("mb-4");
 
-  // ✅ MISE À JOUR : Déplacement de l'option "Pratique délibérée" à la fin
+  // ✅ NOUVEAU : Création dynamique du sélecteur de catégories de pratique
+  const practiceCategorySelect = document.createElement("select");
+  practiceCategorySelect.id = "practice-category-select";
+  practiceCategorySelect.className = "mb-4 p-2 border rounded w-full hidden";
+  practiceCategorySelect.innerHTML = `<option value="">🗂 Choisir une catégorie</option>`;
+  dateSelect.insertAdjacentElement("afterend", practiceCategorySelect);
+
+  // Déplacement de l'option "Pratique délibérée" à la fin du menu
   const pastDates = [
     ...[...Array(7)].map((_, i) => {
       const d = new Date();
@@ -80,12 +87,43 @@ function initApp(apiUrl) {
     dateSelect.appendChild(option);
   });
 
-  // Load the default form, which is today's date (the first item)
+  // Charge par défaut la date du jour
   loadFormForDate(pastDates[0].value);
 
+  // ✅ MISE À JOUR : L'écouteur de dateSelect gère la visibilité du menu de catégories
   dateSelect.addEventListener("change", () => {
-    console.log(`Changement de date détecté. Nouvelle valeur : ${dateSelect.value}`);
-    loadFormForDate(dateSelect.value);
+    const value = dateSelect.value;
+    console.log(`Changement de date détecté : ${value}`);
+  
+    if (value === "__practice__") {
+      console.log("🧠 Mode pratique délibérée sélectionné. Chargement des catégories...");
+  
+      fetch(`${apiUrl}?mode=practice&categoriesOnly=true`)
+        .then(res => res.json())
+        .then(categories => {
+          console.log("✅ Catégories disponibles :", categories);
+          practiceCategorySelect.innerHTML = `<option value="">🗂 Choisir une catégorie</option>`;
+          categories.forEach(cat => {
+            const opt = document.createElement("option");
+            opt.value = cat;
+            opt.textContent = cat.charAt(0).toUpperCase() + cat.slice(1);
+            practiceCategorySelect.appendChild(opt);
+          });
+          practiceCategorySelect.classList.remove("hidden");
+        });
+    } else {
+      practiceCategorySelect.classList.add("hidden");
+      loadFormForDate(value);
+    }
+  });
+
+  // ✅ NOUVEAU : Écouteur pour le sélecteur de catégories de pratique
+  practiceCategorySelect.addEventListener("change", () => {
+    const category = practiceCategorySelect.value;
+    if (category) {
+      console.log(`📂 Catégorie sélectionnée : ${category}`);
+      loadFormForDate("__practice__", category);
+    }
   });
 
   document.getElementById("submitBtn").addEventListener("click", (e) => {
@@ -97,7 +135,7 @@ function initApp(apiUrl) {
     const entries = Object.fromEntries(formData.entries());
     const selectedDate = dateSelect.value;
     
-    // ✅ MISE À JOUR : Utilisation de la date du jour si le mode pratique est sélectionné
+    // Utilisation de la date du jour si le mode pratique est sélectionné
     entries._date = selectedDate === "__practice__" ? new Date().toISOString().split("T")[0] : selectedDate;
     entries.apiUrl = apiUrl;
 
@@ -119,17 +157,23 @@ function initApp(apiUrl) {
       });
   });
 
-  function loadFormForDate(dateISO) {
-    console.log(`Chargement du formulaire pour la date/mode: ${dateISO}`);
+  // ✅ MISE À JOUR : La fonction accepte un paramètre de catégorie
+  function loadFormForDate(dateISO, practiceCategory = null) {
+    console.log(`Chargement du formulaire pour ${dateISO} ${practiceCategory ? `(catégorie : ${practiceCategory})` : ""}`);
     document.getElementById("daily-form").innerHTML = "";
     document.getElementById("submit-section").classList.add("hidden");
 
-    // ✅ MISE À JOUR : Construction de l'URL en fonction du mode (pratique ou date)
-    const url = dateISO === "__practice__"
-      ? `${apiUrl}?mode=practice`
-      : `${apiUrl}?date=${dateISO}`;
-    
-    console.log("URL de l'API construite:", url);
+    let url = "";
+    if (dateISO === "__practice__") {
+      url = `${apiUrl}?mode=practice`;
+      if (practiceCategory) {
+        url += `&cat=${encodeURIComponent(practiceCategory)}`;
+      }
+    } else {
+      url = `${apiUrl}?date=${dateISO}`;
+    }
+
+    console.log("URL API construite :", url);
 
     fetch(url)
       .then(res => {
