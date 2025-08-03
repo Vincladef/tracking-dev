@@ -1,5 +1,5 @@
-// 📁 script.js - Complet et mis à jour pour la pratique délibérée avec sélection de catégorie
-// 🧠 Avec ajout de logs de débogage
+// 📁 script.js - Finalisé pour un seul menu déroulant avec un séparateur visuel
+// 🧠 Toutes les catégories de pratique intégrées au menu principal
 
 // 🧑 Identifier l’utilisateur depuis l’URL
 const urlParams = new URLSearchParams(location.search);
@@ -55,74 +55,59 @@ function initApp(apiUrl) {
   const dateSelect = document.getElementById("date-select");
   dateSelect.classList.add("mb-4");
 
-  // ✅ NOUVEAU : Création dynamique du sélecteur de catégories de pratique
-  const practiceCategorySelect = document.createElement("select");
-  practiceCategorySelect.id = "practice-category-select";
-  practiceCategorySelect.className = "mb-4 p-2 border rounded w-full hidden";
-  practiceCategorySelect.innerHTML = `<option value="">🗂 Choisir une catégorie</option>`;
-  dateSelect.insertAdjacentElement("afterend", practiceCategorySelect);
-
-  // Déplacement de l'option "Pratique délibérée" à la fin du menu
-  const pastDates = [
-    ...[...Array(7)].map((_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      return {
-        value: d.toISOString().split("T")[0],
-        label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
-      };
-    }),
-    {
-      value: "__practice__",
-      label: "🧠 Pratique délibérée"
-    }
-  ];
-  
-  console.log("Dates générées pour le sélecteur:", pastDates);
-
-  pastDates.forEach(opt => {
-    const option = document.createElement("option");
-    option.value = opt.value;
-    option.textContent = opt.label.charAt(0).toUpperCase() + opt.label.slice(1);
-    dateSelect.appendChild(option);
+  // ✅ MISE À JOUR : Création du menu déroulant unique
+  const pastDates = [...Array(7)].map((_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    return {
+      value: d.toISOString().split("T")[0],
+      label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
+    };
   });
 
-  // Charge par défaut la date du jour
-  loadFormForDate(pastDates[0].value);
+  fetch(`${apiUrl}?mode=practice&categoriesOnly=true`)
+    .then(res => res.json())
+    .then(categories => {
+      console.log("✅ Catégories de pratique reçues :", categories);
 
-  // ✅ MISE À JOUR : L'écouteur de dateSelect gère la visibilité du menu de catégories
+      // Ajouter un séparateur visuel
+      pastDates.push({
+        value: "__separator__",
+        label: "────────── Pratique délibérée ──────────",
+        disabled: true
+      });
+
+      // Ajouter chaque catégorie comme option dans le sélecteur principal
+      categories.forEach(cat => {
+        pastDates.push({
+          value: `__practice__::${cat}`,
+          label: `🧠 ${cat.charAt(0).toUpperCase() + cat.slice(1)}`
+        });
+      });
+
+      // Ajouter les options dans le menu déroulant
+      pastDates.forEach(opt => {
+        const option = document.createElement("option");
+        if (opt.disabled) option.disabled = true;
+        option.value = opt.value;
+        option.textContent = opt.label;
+        dateSelect.appendChild(option);
+      });
+
+      // Charger par défaut la date du jour
+      loadFormForDate(pastDates[0].value);
+    });
+
+  // ✅ MISE À JOUR : L'écouteur unique gère la sélection de date ou de catégorie
   dateSelect.addEventListener("change", () => {
     const value = dateSelect.value;
-    console.log(`Changement de date détecté : ${value}`);
-  
-    if (value === "__practice__") {
-      console.log("🧠 Mode pratique délibérée sélectionné. Chargement des catégories...");
-  
-      fetch(`${apiUrl}?mode=practice&categoriesOnly=true`)
-        .then(res => res.json())
-        .then(categories => {
-          console.log("✅ Catégories disponibles :", categories);
-          practiceCategorySelect.innerHTML = `<option value="">🗂 Choisir une catégorie</option>`;
-          categories.forEach(cat => {
-            const opt = document.createElement("option");
-            opt.value = cat;
-            opt.textContent = cat.charAt(0).toUpperCase() + cat.slice(1);
-            practiceCategorySelect.appendChild(opt);
-          });
-          practiceCategorySelect.classList.remove("hidden");
-        });
-    } else {
-      practiceCategorySelect.classList.add("hidden");
-      loadFormForDate(value);
-    }
-  });
+    console.log(`Changement de sélection : ${value}`);
 
-  // ✅ NOUVEAU : Écouteur pour le sélecteur de catégories de pratique
-  practiceCategorySelect.addEventListener("change", () => {
-    const category = practiceCategorySelect.value;
-    if (category) {
-      console.log(`📂 Catégorie sélectionnée : ${category}`);
+    if (value.startsWith("__practice__::")) {
+      const category = value.split("::")[1];
       loadFormForDate("__practice__", category);
+    } else {
+      loadFormForDate(value);
     }
   });
 
@@ -133,10 +118,13 @@ function initApp(apiUrl) {
     const form = document.getElementById("daily-form");
     const formData = new FormData(form);
     const entries = Object.fromEntries(formData.entries());
-    const selectedDate = dateSelect.value;
-    
-    // Utilisation de la date du jour si le mode pratique est sélectionné
-    entries._date = selectedDate === "__practice__" ? new Date().toISOString().split("T")[0] : selectedDate;
+    const selectedValue = dateSelect.value;
+
+    const selectedDate = selectedValue.startsWith("__practice__")
+      ? new Date().toISOString().split("T")[0]
+      : selectedValue;
+
+    entries._date = selectedDate;
     entries.apiUrl = apiUrl;
 
     console.log("Données à envoyer au backend:", entries);
@@ -157,7 +145,7 @@ function initApp(apiUrl) {
       });
   });
 
-  // ✅ MISE À JOUR : La fonction accepte un paramètre de catégorie
+  // La fonction accepte toujours un paramètre de catégorie, mais elle est appelée différemment
   function loadFormForDate(dateISO, practiceCategory = null) {
     console.log(`Chargement du formulaire pour ${dateISO} ${practiceCategory ? `(catégorie : ${practiceCategory})` : ""}`);
     document.getElementById("daily-form").innerHTML = "";
