@@ -45,22 +45,31 @@ function initApp(apiUrl) {
   const dateSelect = document.getElementById("date-select");
   dateSelect.classList.add("mb-4");
 
-  const pastDates = [...Array(7)].map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    return {
-      value: d.toISOString().split("T")[0],
-      label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
-    };
-  });
+  // ✅ MISE À JOUR : Ajout de l'option "Pratique délibérée"
+  const pastDates = [
+    {
+      value: "__practice__",
+      label: "🧠 Pratique délibérée"
+    },
+    ...[...Array(7)].map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      return {
+        value: d.toISOString().split("T")[0],
+        label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
+      };
+    })
+  ];
 
   pastDates.forEach(opt => {
     const option = document.createElement("option");
     option.value = opt.value;
-    option.textContent = opt.label.charAt(0).toUpperCase() + opt.label.slice(1);
+    // La première option (Pratique délibérée) est mise en majuscule ici
+    option.textContent = opt.label.charAt(0).toUpperCase() + opt.label.slice(1); 
     dateSelect.appendChild(option);
   });
 
+  // Charge par défaut la première option (Pratique délibérée)
   loadFormForDate(pastDates[0].value);
 
   dateSelect.addEventListener("change", () => {
@@ -73,7 +82,8 @@ function initApp(apiUrl) {
     const form = document.getElementById("daily-form");
     const formData = new FormData(form);
     const entries = Object.fromEntries(formData.entries());
-    entries._date = dateSelect.value;
+    // ✅ MISE À JOUR : Utilisation de la date du jour si le mode pratique est sélectionné
+    entries._date = dateSelect.value === "__practice__" ? new Date().toISOString().split("T")[0] : dateSelect.value;
     entries.apiUrl = apiUrl;
 
     fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
@@ -93,7 +103,12 @@ function initApp(apiUrl) {
     document.getElementById("daily-form").innerHTML = "";
     document.getElementById("submit-section").classList.add("hidden");
 
-    fetch(`${apiUrl}?date=${dateISO}`)
+    // ✅ MISE À JOUR : Construction de l'URL en fonction du mode (pratique ou date)
+    const url = dateISO === "__practice__"
+      ? `${apiUrl}?mode=practice`
+      : `${apiUrl}?date=${dateISO}`;
+
+    fetch(url)
       .then(res => res.json())
       .then(questions => {
         const container = document.getElementById("daily-form");
