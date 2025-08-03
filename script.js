@@ -1,12 +1,3 @@
-D'accord, je vais modifier votre fichier `script.js` pour placer l'option "🧠 Pratique délibérée" à la fin du menu déroulant et j'y ajouterai des `console.log()` pour le débogage.
-
-Voici le code complet et mis à jour. Vous pouvez le copier et l'utiliser pour remplacer le contenu de votre fichier `script.js` actuel.
-
------
-
-### Script.js – Version finale avec débogage
-
-```javascript
 // 📁 script.js - Complet et mis à jour pour la pratique délibérée en bas du menu
 // 🧠 Avec ajout de logs de débogage
 
@@ -280,4 +271,3 @@ function initApp(apiUrl) {
       });
   }
 }
-```
