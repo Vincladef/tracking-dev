@@ -6,6 +6,24 @@ document.addEventListener('DOMContentLoaded', () => {
     category: null
   };
 
+  const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
+  let DYNAMIC_API_URL = null;
+
+  async function fetchApiUrl(user) {
+    try {
+      const res = await fetch(`${CONFIG_URL}?user=${user}`);
+      const config = await res.json();
+      if (config.error || !config.apiurl) {
+        throw new Error(config.error || "apiUrl manquant");
+      }
+      DYNAMIC_API_URL = config.apiurl;
+      console.log("✅ apiUrl dynamique :", DYNAMIC_API_URL);
+    } catch (err) {
+      console.error("❌ Erreur chargement API URL :", err);
+      alert("Erreur de configuration utilisateur.");
+    }
+  }
+
   const form = document.getElementById('trackingForm');
   const datePicker = document.getElementById('datePicker');
   const userSelect = document.getElementById('userSelect');
@@ -16,8 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const loadingIndicator = document.getElementById('loading');
 
   function getScriptUrl() {
-    // ⚠️ REMPLACEZ CETTE LIGNE par l'URL de déploiement de votre script Apps Script
-    return 'https://script.google.com/macros/s/AKfycbz_VOTRE_ID_DE_DEPLOIEMENT/exec';
+    return DYNAMIC_API_URL || '';
   }
 
   function showLoading() {
@@ -56,6 +73,15 @@ document.addEventListener('DOMContentLoaded', () => {
       form.style.display = 'none';
       return;
     }
+
+    // Assurez-vous que l'URL est bien chargée avant de faire la requête
+    if (!DYNAMIC_API_URL) {
+      showLoading();
+      await fetchApiUrl(appState.user);
+      hideLoading();
+    }
+    
+    if (!DYNAMIC_API_URL) return;
 
     showLoading();
     questionsContainer.innerHTML = '';
@@ -193,7 +219,7 @@ document.addEventListener('DOMContentLoaded', () => {
             radio.id = `${id}-${opt}`;
             radio.name = id;
             radio.value = opt;
-            radio.className = 'hidden'; // Cache le bouton radio par défaut
+            radio.className = 'hidden';
             
             const radioLabel = document.createElement('label');
             radioLabel.htmlFor = `${id}-${opt}`;
@@ -246,7 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const text = await response.text();
       statusMessage.textContent = text;
       statusMessage.className = 'text-green-600 font-bold';
-      fetchQuestions(); // Recharger les questions pour voir l'impact
+      fetchQuestions();
     } catch (error) {
       console.error('Erreur lors de l’envoi des données:', error);
       statusMessage.textContent = 'Erreur: Échec de l’enregistrement.';
@@ -264,12 +290,13 @@ document.addEventListener('DOMContentLoaded', () => {
     window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
   }
 
-  // Initialisation et écouteurs d'événements
   async function init() {
     const params = new URLSearchParams(window.location.search);
-    appState.user = params.get('user') || 'user1'; // Valeur par défaut
+    appState.user = params.get('user') || 'user1';
     appState.mode = params.get('mode') || 'daily';
     appState.category = params.get('cat') || '';
+
+    await fetchApiUrl(appState.user);
 
     userSelect.value = appState.user;
     modeSelect.value = appState.mode;
@@ -285,8 +312,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    userSelect.addEventListener('change', () => {
+    userSelect.addEventListener('change', async () => {
       appState.user = userSelect.value;
+      await fetchApiUrl(appState.user);
       updateUrlWithState();
       fetchQuestions();
     });
@@ -315,7 +343,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchCategories() {
     try {
-      const response = await fetch(`${getScriptUrl()}?user=${appState.user}&categoriesOnly=true`);
+      const url = `${getScriptUrl()}?user=${appState.user}&categoriesOnly=true`;
+      const response = await fetch(url);
       return await response.json();
     } catch (error) {
       console.error('Erreur lors de la récupération des catégories:', error);
