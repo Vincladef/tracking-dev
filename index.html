@@ -12,15 +12,13 @@
 
   <div class="max-w-3xl mx-auto p-6 mt-8 bg-white rounded-xl shadow space-y-6">
 
-    <!-- 🔹 En-tête -->
     <h1 class="text-2xl font-bold">📝 Formulaire du jour</h1>
     <div id="statusMessage" class="text-center text-sm text-red-600"></div>
 
-    <!-- 🔹 Sélecteurs -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
         <label for="userSelect" class="block text-sm font-medium text-gray-700">Utilisateur</label>
-        <select id="userSelect" class="mt-1 block w-full border rounded px-3 py-2 bg-white text-gray-800">
+        <select id="userSelect" class="block w-full border rounded px-3 py-2 bg-white text-gray-800">
           <option value="bob">Bob</option>
           <option value="alice">Alice</option>
         </select>
@@ -28,7 +26,7 @@
 
       <div>
         <label for="modeSelect" class="block text-sm font-medium text-gray-700">Mode</label>
-        <select id="modeSelect" class="mt-1 block w-full border rounded px-3 py-2 bg-white text-gray-800">
+        <select id="modeSelect" class="block w-full border rounded px-3 py-2 bg-white text-gray-800">
           <option value="daily">Quotidien</option>
           <option value="practice">Pratique</option>
         </select>
@@ -36,37 +34,30 @@
 
       <div>
         <label for="categorySelect" class="block text-sm font-medium text-gray-700">Catégorie</label>
-        <select id="categorySelect" class="mt-1 block w-full border rounded px-3 py-2 bg-white text-gray-800">
+        <select id="categorySelect" class="block w-full border rounded px-3 py-2 bg-white text-gray-800">
           <option value="">Toutes les catégories</option>
         </select>
       </div>
 
       <div>
         <label for="datePicker" class="block text-sm font-medium text-gray-700">Date</label>
-        <input type="date" id="datePicker" class="mt-1 block w-full border rounded px-3 py-2 bg-white text-gray-800" />
+        <input type="date" id="datePicker" class="block w-full border rounded px-3 py-2 bg-white text-gray-800">
       </div>
     </div>
 
-    <!-- 🔹 Chargement -->
     <div id="loading" class="text-center py-4 text-gray-500 italic hidden">
       Chargement des questions en cours...
     </div>
 
-    <!-- 🔹 Questions -->
     <div id="questionsContainer" class="space-y-4"></div>
 
-    <!-- 🔹 Formulaire -->
     <form id="trackingForm" class="space-y-6 hidden">
-      <!-- Les questions seront injectées ici -->
       <div class="text-center">
         <button type="submit" class="px-6 py-3 bg-green-600 text-white rounded hover:bg-green-700 transition">
           ✅ Envoyer mes réponses
         </button>
       </div>
     </form>
-
-    <!-- Safelist Tailwind pour les couleurs dynamiques -->
-    <div class="hidden text-green-600 text-red-600 text-yellow-600 text-gray-500 text-blue-500 text-gray-700"></div>
 
   </div>
 </body>
