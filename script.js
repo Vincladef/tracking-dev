@@ -25,9 +25,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const form = document.getElementById('trackingForm');
-  const datePicker = document.getElementById('datePicker');
+  const modeOrDateSelect = document.getElementById('modeOrDateSelect');
   const userTitle = document.getElementById('user-title');
-  const modeSelect = document.getElementById('modeSelect');
+  const categoryBlock = document.getElementById('categoryBlock');
   const categorySelect = document.getElementById('categorySelect');
   const questionsContainer = document.getElementById('questionsContainer');
   const statusMessage = document.getElementById('statusMessage');
@@ -49,21 +49,35 @@ document.addEventListener('DOMContentLoaded', () => {
     return (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   }
 
-  function formatDateForAPI(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+  function getColorClass(value) {
+    const val = value.toLowerCase();
+    if (val.includes('oui')) return 'text-green-600';
+    if (val.includes('non')) return 'text-red-600';
+    if (val.includes('moyen')) return 'text-yellow-600';
+    return 'text-gray-500';
   }
+  
+  // Fonction pour peupler le nouveau sélecteur
+  function populateModeOrDateSelect() {
+    const today = new Date();
+    modeOrDateSelect.innerHTML = '';
 
-  function updateDatePicker() {
-    datePicker.value = formatDateForAPI(appState.selectedDate);
-  }
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(today.getDate() - i);
+      const iso = d.toISOString().split("T")[0];
+      const label = d.toLocaleDateString("fr-FR", { weekday: 'long', day: 'numeric', month: 'long' });
 
-  function updateModeAndCategoryDisplay() {
-    const isPracticeMode = appState.mode === 'practice';
-    categorySelect.parentNode.style.display = isPracticeMode ? 'block' : 'none';
-    datePicker.parentNode.style.display = isPracticeMode ? 'none' : 'block';
+      const opt = document.createElement('option');
+      opt.value = iso;
+      opt.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+      modeOrDateSelect.appendChild(opt);
+    }
+
+    const optPractice = document.createElement('option');
+    optPractice.value = 'practice';
+    optPractice.textContent = '⏱️ Mode pratique';
+    modeOrDateSelect.appendChild(optPractice);
   }
 
   async function fetchQuestions() {
@@ -89,7 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
       user: appState.user,
       mode: appState.mode,
       cat: appState.category || '',
-      date: appState.mode === 'daily' ? formatDateForAPI(appState.selectedDate) : ''
+      date: appState.mode === 'daily' ? appState.selectedDate.toISOString().split("T")[0] : ''
     });
 
     const url = `${getScriptUrl()}?${params.toString()}`;
@@ -113,14 +127,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function getColorClass(value) {
-    const val = value.toLowerCase();
-    if (val.includes('oui')) return 'text-green-600';
-    if (val.includes('non')) return 'text-red-600';
-    if (val.includes('moyen')) return 'text-yellow-600';
-    return 'text-gray-500';
-  }
-
   function renderQuestions(questions) {
     questionsContainer.innerHTML = '';
     form.reset();
@@ -128,7 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (questions.length === 0) {
       statusMessage.textContent = appState.mode === 'practice'
         ? 'Aucune pratique délibérée trouvée pour cette catégorie.'
-        : 'Rien à remplir pour aujourd\'hui. Profite de ta journée !';
+        : 'Rien à remplir pour cette date. Profite de ta journée !';
       form.style.display = 'none';
       return;
     }
@@ -192,7 +198,7 @@ document.addEventListener('DOMContentLoaded', () => {
         historyToggle.addEventListener('click', (e) => {
           e.preventDefault();
           historyList.classList.toggle('hidden');
-          historyToggle.textContent = historyList.classList.contains('hidden') ? '🔍 Voir l\'historique' : '🔼 Masquer l\'historique';
+          historyToggle.textContent = historyList.classList.contains('hidden') ? '🔼 Masquer l\'historique' : '🔍 Voir l\'historique';
         });
         questionDiv.appendChild(historyList);
       }
@@ -218,7 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
             radio.id = `${id}-${opt}`;
             radio.name = id;
             radio.value = opt;
-            radio.className = 'hidden';
+            radio.className = 'hidden peer';
             
             const radioLabel = document.createElement('label');
             radioLabel.htmlFor = `${id}-${opt}`;
@@ -249,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const formData = new FormData(form);
     const data = {
       _user: appState.user,
-      _date: appState.mode === 'daily' ? formatDateForAPI(appState.selectedDate) : '__practice__',
+      _date: appState.mode === 'daily' ? appState.selectedDate.toISOString().split("T")[0] : '__practice__',
       mode: appState.mode,
       category: appState.category
     };
@@ -289,55 +295,6 @@ document.addEventListener('DOMContentLoaded', () => {
     window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
   }
 
-  async function init() {
-    const params = new URLSearchParams(window.location.search);
-    appState.user = params.get('user') || 'user1';
-    appState.mode = params.get('mode') || 'daily';
-    appState.category = params.get('cat') || '';
-    
-    // Affichage du nom de l'utilisateur
-    userTitle.textContent = `Utilisateur : ${appState.user}`;
-
-    await fetchApiUrl(appState.user);
-
-    modeSelect.value = appState.mode;
-
-    updateModeAndCategoryDisplay();
-    updateDatePicker();
-
-    if (appState.mode === 'practice') {
-      const categories = await fetchCategories();
-      renderCategories(categories);
-      if (appState.category) {
-        categorySelect.value = appState.category;
-      }
-    }
-
-    // Gestion du changement de mode
-    modeSelect.addEventListener('change', () => {
-      appState.mode = modeSelect.value;
-      updateModeAndCategoryDisplay();
-      updateUrlWithState();
-      fetchQuestions();
-    });
-
-    // Gestion du changement de catégorie
-    categorySelect.addEventListener('change', () => {
-      appState.category = categorySelect.value;
-      updateUrlWithState();
-      fetchQuestions();
-    });
-
-    // Gestion du changement de date
-    datePicker.addEventListener('change', (e) => {
-      appState.selectedDate = new Date(e.target.value);
-      fetchQuestions();
-    });
-
-    form.addEventListener('submit', handleSubmit);
-    fetchQuestions();
-  }
-
   async function fetchCategories() {
     try {
       const url = `${getScriptUrl()}?user=${appState.user}&categoriesOnly=true`;
@@ -359,5 +316,57 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  async function init() {
+    const params = new URLSearchParams(window.location.search);
+    appState.user = params.get('user') || 'user1';
+    appState.mode = params.get('mode') || 'daily';
+    appState.category = params.get('cat') || '';
+    
+    userTitle.textContent = `Utilisateur : ${appState.user}`;
+
+    await fetchApiUrl(appState.user);
+    populateModeOrDateSelect();
+    
+    // Initialiser le sélecteur avec les valeurs de l'URL ou par défaut
+    if (appState.mode === 'daily') {
+        const todayIso = new Date().toISOString().split("T")[0];
+        modeOrDateSelect.value = appState.selectedDate ? appState.selectedDate.toISOString().split("T")[0] : todayIso;
+        categoryBlock.classList.add('hidden');
+    } else if (appState.mode === 'practice') {
+        modeOrDateSelect.value = 'practice';
+        categoryBlock.classList.remove('hidden');
+        await fetchCategories();
+        if (appState.category) {
+            categorySelect.value = appState.category;
+        }
+    }
+
+    modeOrDateSelect.addEventListener('change', async (e) => {
+        const value = e.target.value;
+        if (value === 'practice') {
+          appState.mode = 'practice';
+          appState.selectedDate = null;
+          categoryBlock.classList.remove('hidden');
+          await fetchCategories();
+        } else {
+          appState.mode = 'daily';
+          appState.selectedDate = new Date(value);
+          categoryBlock.classList.add('hidden');
+        }
+
+        updateUrlWithState();
+        fetchQuestions();
+    });
+
+    categorySelect.addEventListener('change', () => {
+      appState.category = categorySelect.value;
+      updateUrlWithState();
+      fetchQuestions();
+    });
+
+    form.addEventListener('submit', handleSubmit);
+    fetchQuestions();
+  }
+  
   init();
 });
