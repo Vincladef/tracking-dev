@@ -133,8 +133,8 @@ function sendAllTelegramReminders() {
 
       const botToken = botApi.replace("https://api.telegram.org/bot", "").split("/")[0];
       const message = count === 0
-        ? `🎉 Hello ${user}, rien à remplir aujourd'hui !\n👉 ${trackingUrl}`
-        : `📋 Hello ${user}, tu as ${count} chose(s) à traquer aujourd'hui (${formattedDate})\n👉 ${trackingUrl}`;
+        ? `🎉 Hello ${user}, rien à remplir aujourd’hui !\n👉 ${trackingUrl}`
+        : `📋 Hello ${user}, tu as ${count} chose(s) à traquer aujourd’hui (${formattedDate})\n👉 ${trackingUrl}`;
 
       sendTelegramMessage(chatId, message, botToken);
       Logger.log(`   ✅ Message de rappel préparé pour ${user}.`);
@@ -180,14 +180,16 @@ function doPost(e) {
     colNameToUse = `pratique ${practiceIndex}`;
     Logger.log(`[doPost] Nom de la nouvelle colonne de pratique : ${colNameToUse}`);
 
-    // Insertion à un index fixe (après les questions)
     const fixedInsertIndex = 6;
     Logger.log(`[doPost] La nouvelle colonne sera insérée à l'index fixe : ${fixedInsertIndex}.`);
     
     sheet.insertColumnBefore(fixedInsertIndex);
     sheet.getRange(1, fixedInsertIndex).setValue(colNameToUse);
-    colIndex = fixedInsertIndex;
+    // ✅ CORRECTION APPORTÉE : Enregistrement de la date dans la deuxième ligne de la colonne de pratique
+    const todayStr = Utilities.formatDate(new Date(), "GMT+1", "dd/MM/yyyy");
+    sheet.getRange(2, fixedInsertIndex).setValue(todayStr);
 
+    colIndex = fixedInsertIndex;
   } else {
     Logger.log("[doPost] Traitement en mode 'Quotidien'.");
     const selectedDate = data._date;
@@ -221,7 +223,7 @@ function doPost(e) {
     }
   }
 
-  Logger.log(`[doPost] ✅ Données seront écrites dans la colonne "${colNameToUse}" à l'index ${colIndex}.`);
+  Logger.log(`[doPost] ✅ Données seront écrites dans la colonne "${colNameToUse}" à l’index ${colIndex}.`);
 
   const questions = sheet.getRange(2, 5, sheet.getLastRow() - 1).getValues().flat();
   Logger.log(`[doPost] Nombre de questions à traiter : ${questions.length}`);
@@ -239,7 +241,7 @@ function doPost(e) {
     ? `✅ Données de pratique (${colNameToUse}) enregistrées !` 
     : `✅ Données quotidiennes (${colNameToUse}) enregistrées !`;
     
-  Logger.log(`[doPost] ✅ Fin de l'écriture. Toutes les réponses ont été insérées dans la colonne "${colNameToUse}".`);
+  Logger.log(`[doPost] ✅ Fin de l’écriture. Toutes les réponses ont été insérées dans la colonne "${colNameToUse}".`);
   Logger.log(`✅ [doPost] Fin de la requête. Message de succès : ${successMessage}`);
   return ContentService.createTextOutput(successMessage).setMimeType(ContentService.MimeType.TEXT);
 }
@@ -327,12 +329,11 @@ function doGet(e) {
     const label = row[4] || "";
     const category = clean(row[1] || "");
     
-    let history = []; // L'historique sera rempli plus tard selon le mode
+    let history = []; 
 
     let shouldInclude = false;
 
     if (isPracticeMode) {
-      // ✅ CORRECTION APPORTÉE : Toujours inclure la question si c'est une pratique de la bonne catégorie
       shouldInclude = isPractice && (!categoryFilter || category === categoryFilter);
       if (shouldInclude) {
         Logger.log(`- Question "${label}" incluse (mode pratique, catégorie: ${category}).`);
@@ -357,15 +358,14 @@ function doGet(e) {
 
     if (isSpaced) {
       if (isPracticeMode) {
-        // ✅ CORRECTION APPORTÉE : Logique de répétition espacée pour la pratique délibérée
         const iterationHistory = headers
           .map((h, i) => ({ name: h, index: i }))
           .filter(h => h.name.toLowerCase().startsWith("pratique"))
-          .filter(h => row[h.index]) // a une réponse
+          .filter(h => row[h.index])
           .sort((a, b) => {
             const aN = parseInt(a.name.split(" ")[1]);
             const bN = parseInt(b.name.split(" ")[1]);
-            return bN - aN; // Sortir par numéro de pratique descendant (plus récent en premier)
+            return bN - aN;
           });
         
         const latestAnswer = iterationHistory.length > 0 ? clean(row[iterationHistory[0].index]) : "pas de reponse";
@@ -388,12 +388,10 @@ function doGet(e) {
           required: delay
         };
 
-        // ✅ CORRECTION APPORTÉE : Construction de l'historique de pratique au bon format
-        const sheetDates = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
         for (const h of iterationHistory) {
           const val = row[h.index];
           const repetitionNumber = h.name.split(" ")[1];
-          const dateStr = sheetDates[0][h.index]; // Récupérer la date de la ligne 1
+          const dateStr = sheet.getRange(2, h.index + 1).getValue(); // Récupérer la date de la ligne 2
           history.push({
             value: val,
             repetition: `répétition ${repetitionNumber}`,
@@ -401,7 +399,6 @@ function doGet(e) {
           });
         }
       } else {
-        // Logique existante pour les suivis quotidiens
         const { score, lastDate } = computeScoreAndLastDate(row);
         const delay = DELAYS[score];
         Logger.log(`-- Question "${label}" est de type 'répétition espacée'. Score: ${score}, Délai: ${delay} jours.`);
@@ -421,7 +418,6 @@ function doGet(e) {
           };
         }
         
-        // Construction de l'historique quotidien pour l'affichage
         for (let col = headers.length - 1; col >= 5; col--) {
           const val = row[col];
           const dateStr = headers[col];
@@ -455,4 +451,4 @@ function doGet(e) {
   return ContentService
     .createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
-} 
+}
