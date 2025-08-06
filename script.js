@@ -1,5 +1,3 @@
-// script.js
-
 // 📁 App Script – Finalisé pour les suivis quotidiens et les pratiques délibérées
 const CONFIG_SHEET_ID = '1D9M3IEPtD7Vbdt7THBvNm8CiQ3qdrelyR-EdgNmd6go';
 const ANSWER_VALUES = {
