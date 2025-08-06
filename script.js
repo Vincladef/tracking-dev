@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const form = document.getElementById('trackingForm');
   const datePicker = document.getElementById('datePicker');
-  const userSelect = document.getElementById('userSelect');
+  const userTitle = document.getElementById('user-title');
   const modeSelect = document.getElementById('modeSelect');
   const categorySelect = document.getElementById('categorySelect');
   const questionsContainer = document.getElementById('questionsContainer');
@@ -74,7 +74,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Assurez-vous que l'URL est bien chargée avant de faire la requête
     if (!DYNAMIC_API_URL) {
       showLoading();
       await fetchApiUrl(appState.user);
@@ -295,10 +294,12 @@ document.addEventListener('DOMContentLoaded', () => {
     appState.user = params.get('user') || 'user1';
     appState.mode = params.get('mode') || 'daily';
     appState.category = params.get('cat') || '';
+    
+    // Affichage du nom de l'utilisateur
+    userTitle.textContent = `Utilisateur : ${appState.user}`;
 
     await fetchApiUrl(appState.user);
 
-    userSelect.value = appState.user;
     modeSelect.value = appState.mode;
 
     updateModeAndCategoryDisplay();
@@ -312,13 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    userSelect.addEventListener('change', async () => {
-      appState.user = userSelect.value;
-      await fetchApiUrl(appState.user);
-      updateUrlWithState();
-      fetchQuestions();
-    });
-
+    // Gestion du changement de mode
     modeSelect.addEventListener('change', () => {
       appState.mode = modeSelect.value;
       updateModeAndCategoryDisplay();
@@ -326,12 +321,14 @@ document.addEventListener('DOMContentLoaded', () => {
       fetchQuestions();
     });
 
+    // Gestion du changement de catégorie
     categorySelect.addEventListener('change', () => {
       appState.category = categorySelect.value;
       updateUrlWithState();
       fetchQuestions();
     });
 
+    // Gestion du changement de date
     datePicker.addEventListener('change', (e) => {
       appState.selectedDate = new Date(e.target.value);
       fetchQuestions();
