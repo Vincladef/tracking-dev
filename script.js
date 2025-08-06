@@ -1,3 +1,5 @@
+// script.js
+
 // 📁 App Script – Finalisé pour les suivis quotidiens et les pratiques délibérées
 const CONFIG_SHEET_ID = '1D9M3IEPtD7Vbdt7THBvNm8CiQ3qdrelyR-EdgNmd6go';
 const ANSWER_VALUES = {
@@ -20,9 +22,8 @@ function clean(str) {
     .toLowerCase()
     .trim();
 }
-
 function getUserConfig(user) {
-  const sheet = SpreadsheetApp.openById(CONFIG_SHEET_ID).getSheets()[0];
+  const sheet = SpreadsheetApp.openById(CONFIG_SHEET_ID).getSheets()[1];
   const data = sheet.getDataRange().getValues();
   const headers = data[0].map(h => h.toString().toLowerCase());
   for (let i = 1; i < data.length; i++) {
