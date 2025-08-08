@@ -15,12 +15,33 @@
     <p id="date-display" class="text-gray-600 mb-4"></p>
 
     <!-- 📅 Sélecteur de date -->
-    <div class="mb-6">
+    <div class="mb-4">
       <label for="date-select" class="block text-sm font-medium text-gray-700 mb-1">
         Pour quelle date remplis-tu ce formulaire ?
       </label>
       <select id="date-select" class="block w-full border border-gray-300 rounded px-3 py-2 bg-white text-gray-800">
         <!-- Options insérées dynamiquement via script.js -->
+      </select>
+    </div>
+
+    <!-- 🆕 Mode de saisie -->
+    <div class="mb-4">
+      <label class="block text-sm font-medium text-gray-700 mb-1">
+        Mode de saisie
+      </label>
+      <select id="mode-select" class="block w-full border border-gray-300 rounded px-3 py-2 bg-white text-gray-800">
+        <option value="daily" selected>Journalier (par date)</option>
+        <option value="practice">Mode pratique (itérations)</option>
+      </select>
+    </div>
+
+    <!-- 🆕 Catégorie (affichée seulement en mode Pratique) -->
+    <div id="practice-category-wrap" class="mb-6 hidden">
+      <label class="block text-sm font-medium text-gray-700 mb-1">
+        Choisis une catégorie de pratique
+      </label>
+      <select id="practice-category" class="block w-full border border-gray-300 rounded px-3 py-2 bg-white text-gray-800">
+        <!-- Rempli dynamiquement via script.js -->
       </select>
     </div>
 
