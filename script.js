@@ -35,7 +35,7 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
     console.error("Erreur attrapée :", err);
   });
 
-function initApp(apiUrl) {
+async function initApp(apiUrl) {
   // Titre dynamique
   document.getElementById("user-title").textContent =
     `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
@@ -48,86 +48,87 @@ function initApp(apiUrl) {
   const dateSelect = document.getElementById("date-select");
   dateSelect.classList.add("mb-4");
 
-  // 🆕 Création dynamique du sélecteur de mode + sélecteur de catégorie (pour ne pas toucher au HTML)
-  const selectParent = dateSelect.parentElement;
+  // ➡️ Remplir le select avec : Dates (7j) + (optionnel) Mode pratique — catégories
+  async function buildCombinedSelect() {
+    const sel = document.getElementById("date-select");
+    sel.innerHTML = "";
 
-  const modeWrap = document.createElement("div");
-  modeWrap.className = "mb-4";
-  modeWrap.innerHTML = `
-    <label class="block text-sm font-medium text-gray-700 mb-1">
-      Mode de saisie
-    </label>
-    <select id="mode-select" class="block w-full border border-gray-300 rounded px-3 py-2 bg-white text-gray-800">
-      <option value="daily" selected>Journalier (par date)</option>
-      <option value="practice">Mode pratique (itérations)</option>
-    </select>
-  `;
-  selectParent.after(modeWrap);
+    // Placeholder
+    const ph = document.createElement("option");
+    ph.disabled = true; ph.hidden = true; ph.selected = true;
+    ph.textContent = "Choisis une date ou un mode pratique…";
+    sel.appendChild(ph);
 
-  const practiceWrap = document.createElement("div");
-  practiceWrap.id = "practice-category-wrap";
-  practiceWrap.className = "mb-6 hidden";
-  practiceWrap.innerHTML = `
-    <label class="block text-sm font-medium text-gray-700 mb-1">
-      Choisis une catégorie de pratique
-    </label>
-    <select id="practice-category" class="block w-full border border-gray-300 rounded px-3 py-2 bg-white text-gray-800"></select>
-  `;
-  modeWrap.after(practiceWrap);
+    // Groupe Dates
+    const ogDates = document.createElement("optgroup");
+    ogDates.label = "Dates (7 derniers jours)";
+    const pastDates = [...Array(7)].map((_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      return {
+        value: d.toISOString().split("T")[0],
+        label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
+      };
+    });
+    pastDates.forEach(opt => {
+      const o = document.createElement("option");
+      o.textContent = opt.label.charAt(0).toUpperCase() + opt.label.slice(1);
+      o.dataset.mode = "daily";
+      o.dataset.date = opt.value; // YYYY-MM-DD
+      ogDates.appendChild(o);
+    });
+    sel.appendChild(ogDates);
 
-  const modeSelect = document.getElementById("mode-select");
-  const practiceSelect = document.getElementById("practice-category");
+    // Groupe Mode pratique (si dispo)
+    try {
+      const res = await fetch(`${apiUrl}?mode=practice`);
+      const cats = await res.json();
+      if (Array.isArray(cats) && cats.length) {
+        // Séparateur visuel
+        const sep = document.createElement("option");
+        sep.disabled = true; sep.textContent = "────────";
+        sel.appendChild(sep);
 
-  // ➡️ Remplir les 7 dates passées
-  const pastDates = [...Array(7)].map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    return {
-      value: d.toISOString().split("T")[0],
-      label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
-    };
-  });
-
-  pastDates.forEach(opt => {
-    const option = document.createElement("option");
-    option.value = opt.value;
-    option.textContent = opt.label.charAt(0).toUpperCase() + opt.label.slice(1);
-    dateSelect.appendChild(option);
-  });
-
-  // État initial : mode journalier sur aujourd'hui
-  loadFormForDate(pastDates[0].value);
-
-  // 🎛️ Listeners
-  dateSelect.addEventListener("change", () => {
-    if (modeSelect.value === "daily") {
-      loadFormForDate(dateSelect.value);
-    }
-  });
-
-  modeSelect.addEventListener("change", async () => {
-    if (modeSelect.value === "daily") {
-      // Retour au journalier
-      practiceWrap.classList.add("hidden");
-      loadFormForDate(dateSelect.value);
-    } else {
-      // Passage au mode pratique
-      practiceWrap.classList.remove("hidden");
-      await loadPracticeCategories(apiUrl);
-      if (practiceSelect.value) {
-        await loadPracticeForm(apiUrl, practiceSelect.value);
-      } else {
-        // Aucune catégorie → vider le formulaire
-        clearFormUI();
+        const ogPractice = document.createElement("optgroup");
+        ogPractice.label = "Mode pratique — catégories";
+        cats.forEach(cat => {
+          const o = document.createElement("option");
+          o.textContent = `Mode pratique — ${cat}`;
+          o.dataset.mode = "practice";
+          o.dataset.category = cat;
+          ogPractice.appendChild(o);
+        });
+        sel.appendChild(ogPractice);
       }
+    } catch (e) {
+      console.warn("Impossible de charger les catégories de pratique", e);
     }
-  });
 
-  practiceSelect.addEventListener("change", async () => {
-    if (modeSelect.value === "practice" && practiceSelect.value) {
-      await loadPracticeForm(apiUrl, practiceSelect.value);
+    // Sélectionner automatiquement la première date
+    const firstDate = ogDates.querySelector("option");
+    if (firstDate) {
+      ph.selected = false;
+      firstDate.selected = true;
     }
-  });
+  }
+  
+  await buildCombinedSelect();
+
+  // État initial
+  handleSelectChange();
+
+  dateSelect.addEventListener("change", handleSelectChange);
+
+  function handleSelectChange() {
+    const sel = document.getElementById("date-select");
+    if (!sel || !sel.selectedOptions.length) return;
+    const selected = sel.selectedOptions[0];
+    const mode = selected.dataset.mode || "daily";
+    if (mode === "daily") {
+      loadFormForDate(selected.dataset.date);
+    } else {
+      loadPracticeForm(selected.dataset.category);
+    }
+  }
 
   // 📨 Soumission
   document.getElementById("submitBtn").addEventListener("click", (e) => {
@@ -137,15 +138,17 @@ function initApp(apiUrl) {
     const formData = new FormData(form);
     const entries = Object.fromEntries(formData.entries());
 
-    if (modeSelect.value === "daily") {
+    const selected = dateSelect.selectedOptions[0];
+    const mode = selected?.dataset.mode || "daily";
+
+    if (mode === "daily") {
       entries._mode = "daily";
-      entries._date = dateSelect.value;
-      entries.apiUrl = apiUrl;
+      entries._date = selected.dataset.date; // YYYY-MM-DD
     } else {
       entries._mode = "practice";
-      entries._category = practiceSelect.value; // catégorie exacte (colonne B)
-      entries.apiUrl = apiUrl;
+      entries._category = selected.dataset.category; // nom exact
     }
+    entries.apiUrl = apiUrl;
 
     fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
       method: "POST",
@@ -178,49 +181,30 @@ function initApp(apiUrl) {
 
   function loadFormForDate(dateISO) {
     clearFormUI();
+    const loader = document.getElementById("loader");
+    if (loader) loader.classList.remove("hidden");
 
     fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}`)
       .then(res => res.json())
       .then(renderQuestions)
       .catch(err => {
+        document.getElementById("loader")?.classList.add("hidden");
         console.error(err);
         alert("❌ Erreur de chargement du formulaire journalier.");
       });
   }
 
-  async function loadPracticeCategories(apiUrl) {
+  async function loadPracticeForm(category) {
     clearFormUI();
-    try {
-      const res = await fetch(`${apiUrl}?mode=practice`);
-      const cats = await res.json(); // ex: ["Prospection téléphonique", "Lecture rapide"]
-      practiceSelect.innerHTML = "";
-      if (Array.isArray(cats) && cats.length) {
-        cats.forEach(c => {
-          const o = document.createElement("option");
-          o.value = c;
-          o.textContent = c;
-          practiceSelect.appendChild(o);
-        });
-      } else {
-        const o = document.createElement("option");
-        o.value = "";
-        o.textContent = "Aucune catégorie disponible";
-        practiceSelect.appendChild(o);
-      }
-      showFormUI();
-    } catch (e) {
-      console.error(e);
-      alert("❌ Erreur lors du chargement des catégories de pratique.");
-    }
-  }
+    const loader = document.getElementById("loader");
+    if (loader) loader.classList.remove("hidden");
 
-  async function loadPracticeForm(apiUrl, category) {
-    clearFormUI();
     try {
       const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`);
       const questions = await res.json();
       renderQuestions(questions);
     } catch (e) {
+      document.getElementById("loader")?.classList.add("hidden");
       console.error(e);
       alert("❌ Erreur lors du chargement du formulaire de pratique.");
     }
@@ -261,16 +245,18 @@ function initApp(apiUrl) {
       // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
       let referenceAnswer = "";
       if (q.history && Array.isArray(q.history)) {
-        const dateISO = document.getElementById("date-select").value;
-        const entry = q.history.find(entry => {
-          if (entry?.date) {
-            const [dd, mm, yyyy] = entry.date.split("/");
-            const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-            return entryDateISO === dateISO;
-          }
-          return false;
-        });
-        referenceAnswer = entry?.value || "";
+        const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
+        if (dateISO) {
+           const entry = q.history.find(entry => {
+             if (entry?.date) {
+               const [dd, mm, yyyy] = entry.date.split("/");
+               const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+               return entryDateISO === dateISO;
+             }
+             return false;
+           });
+           referenceAnswer = entry?.value || "";
+        }
       }
 
       if (q.skipped) {
@@ -293,10 +279,8 @@ function initApp(apiUrl) {
         if (type.includes("oui")) {
           input = document.createElement("div");
           input.className = "space-x-6 text-gray-700";
-          input.innerHTML = `
-            <label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-            <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>
-          `;
+          input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
+            <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
         } else if (type.includes("menu") || type.includes("likert")) {
           input = document.createElement("select");
           input.name = q.id;
