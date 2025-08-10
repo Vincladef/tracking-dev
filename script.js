@@ -332,46 +332,90 @@ async function initApp() {
         const historyBlock = document.createElement("div");
         historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
 
-        // --- Graphe dans l’historique (sparkline) ---
-        (() => {
-          const SCORE_MAP = { "oui":1, "plutot oui":0.75, "moyen":0.25, "plutot non":0, "non":-1, "pas de reponse":0 };
-          const seriesRaw = (q.history || []).map(h => SCORE_MAP[normalize(h.value)]).filter(v => typeof v==="number");
-          const MAX_POINTS = 30;
-          const series = seriesRaw.slice(0, MAX_POINTS).reverse(); // ancien -> récent (gauche->droite)
+        // ==== Stats compactes (sur les 10 dernières) ====
+        const LIMIT = 10;           // nombre d'éléments visibles par défaut
+        const STATS_WINDOW = 10;    // stats calculées sur les 10 dernières
+        const SCORE_MAP = { "oui": 1, "plutot oui": 0.75, "moyen": 0.25, "plutot non": 0, "non": -1, "pas de reponse": 0 };
+        const POSITIVE = new Set(["oui", "plutot oui"]);
+        const parseDateFromEntry = (entry) => {
+          const s = entry.date || entry.key || "";
+          const m1 = s.match(/^(\d{2}\/\d{2}\/\d{4})$/);
+          const m2 = s.match(/\((\d{2}\/\d{2}\/\d{4})\)/);
+          const str = m1 ? m1[1] : (m2 ? m2[1] : null);
+          if (!str) return null;
+          const [dd, mm, yyyy] = str.split("/");
+          return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+        };
+        const hist = (q.history || []).map(e => {
+          const v = normalize(e.value);
+          return { raw: e, v, score: (SCORE_MAP[v] ?? null), isPos: POSITIVE.has(v), date: parseDateFromEntry(e) };
+        });
+        
+        // fenêtrage : on prend les 10 plus récentes
+        const windowHist = hist.slice(0, STATS_WINDOW);
+        const last = windowHist[0] || null; // dernière réponse (la plus récente)
+        const lastScores = windowHist.filter(h => typeof h.score === "number");
+        
+        // moyenne sur les 10 dernières
+        const avg10 = lastScores.length ? (lastScores.reduce((s,h)=>s+h.score,0) / lastScores.length) : null;
+        
+        // taux positifs sur les 10 dernières
+        const posRate10 = windowHist.length ? (windowHist.filter(h => h.isPos).length / windowHist.length) : null;
+        
+        // streak actuelle & meilleure (sur la fenêtre de 10)
+        let currentStreak = 0, bestStreak = 0, run = 0;
+        windowHist.forEach((h, idx) => { if (h.isPos) { run++; bestStreak = Math.max(bestStreak, run); if (idx===0) currentStreak = run; } else { if (idx===0) currentStreak = 0; run = 0; } });
+        
+        // jours depuis la dernière positive (dans la fenêtre)
+        let daysSincePositive = null;
+        const lastPos = windowHist.find(h => h.isPos && h.date);
+        if (lastPos) {
+          const MS = 86400000;
+          daysSincePositive = Math.floor((new Date().setHours(0,0,0,0) - lastPos.date.getTime()) / MS);
+        }
+        
+        // rendu badges
+        const badge = (title, value, tone="blue") => {
+          const div = document.createElement("div");
+          const tones = {
+            blue:"bg-blue-50 text-blue-700 border-blue-200",
+            green:"bg-green-50 text-green-700 border-green-200",
+            yellow:"bg-yellow-50 text-yellow-700 border-yellow-200",
+            red:"bg-red-50 text-red-700 border-red-200",
+            gray:"bg-gray-50 text-gray-700 border-gray-200",
+            purple:"bg-purple-50 text-purple-700 border-purple-200"
+          };
+          div.className = `px-2.5 py-1 rounded-full border text-xs font-medium ${tones[tone]||tones.gray}`;
+          div.innerHTML = `<span class="opacity-70">${title}:</span> <span class="font-semibold">${value}</span>`;
+          return div;
+        };
+        const statsWrap = document.createElement("div");
+        statsWrap.className = "mb-3 flex flex-wrap gap-2 items-center";
+        
+        if (last) {
+          const when = last.date ? last.date.toLocaleDateString("fr-FR") : (last.raw.date || last.raw.key || "");
+          statsWrap.appendChild(badge("Dernière réponse", `${when} — ${last.raw.value}`, "purple"));
+        }
+        if (avg10 !== null) {
+          const v = (Math.round(avg10*100)/100).toLocaleString("fr-FR");
+          statsWrap.appendChild(badge("Moyenne (10)", v, "blue"));
+        }
+        if (posRate10 !== null) {
+          const p = Math.round(posRate10*100);
+          const tone = p >= 80 ? "green" : p >= 50 ? "yellow" : "red";
+          statsWrap.appendChild(badge("Taux positifs (10)", `${p}%`, tone));
+        }
+        statsWrap.appendChild(badge("Série actuelle", currentStreak, currentStreak>0 ? "green":"gray"));
+        statsWrap.appendChild(badge("Meilleure série (10)", bestStreak, bestStreak>=5 ? "green":"gray"));
+        if (daysSincePositive !== null) {
+          const tone = daysSincePositive===0 ? "green" : daysSincePositive<=3 ? "yellow":"red";
+          const label = daysSincePositive===0 ? "aujourd’hui" : `${daysSincePositive} j`;
+          statsWrap.appendChild(badge("Depuis la dernière positive", label, tone));
+        }
+        
+        historyBlock.appendChild(statsWrap);
 
-          if (series.length > 1) {
-            console.log(`📊 Dessin d'un graphe pour la question "${q.label}" avec ${series.length} points.`);
-            const canvas = document.createElement("canvas");
-            // retina friendly
-            const dpr = window.devicePixelRatio || 1;
-            const cssW = 500, cssH = 60;
-            canvas.width = cssW * dpr; canvas.height = cssH * dpr;
-            canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px";
-            canvas.className = "w-full block mb-3";
-            historyBlock.appendChild(canvas);
-
-            const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr);
-            const padX=6, padY=6, w=cssW-padX*2, h=cssH-padY*2;
-            const minY=-1, maxY=1;
-            const xStep = series.length>1 ? (w/(series.length-1)) : w;
-
-            // fond + ligne zéro
-            ctx.fillStyle = "#f9fafb"; ctx.fillRect(0,0,cssW,cssH);
-            const y0 = padY + h*(1-((0-minY)/(maxY-minY)));
-            ctx.strokeStyle="#e5e7eb"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(padX,y0); ctx.lineTo(padX+w,y0); ctx.stroke();
-
-            // courbe
-            ctx.strokeStyle="#2563eb"; ctx.lineWidth=2; ctx.beginPath();
-            series.forEach((v,i)=>{ const x=padX+i*xStep; const y=padY+h*(1-((v-minY)/(maxY-minY))); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
-            ctx.stroke();
-
-            // points
-            ctx.fillStyle="#1f2937";
-            series.forEach((v,i)=>{ const x=padX+i*xStep; const y=padY+h*(1-((v-minY)/(maxY-minY))); ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2); ctx.fill(); });
-          }
-        })(); // Fin du bloc du graphe
-
-        // --- Liste avec limite + bouton "Afficher plus" (inchangé) ---
+        // ==== Fin stats ====
         const LIMIT = 10;
         (q.history || []).forEach((entry, idx) => {
           const key = entry.date || entry.key || "";
