@@ -225,6 +225,7 @@ async function initApp() {
   function renderLikertChart(parentEl, history, normalize) {
     // on prend max 30 points, ancien -> récent (gauche -> droite)
     const MAX_POINTS = 30;
+    // on inverse les niveaux pour que "oui" soit en haut et "non" en bas
     const levels = ["non", "plutot non", "moyen", "plutot oui", "oui"];
     const labelByNorm = {
       "non": "Non", "plutot non": "Plutôt non", "moyen": "Moyen",
@@ -270,7 +271,8 @@ async function initApp() {
     ctx.fillStyle = "#374151"; // gris foncé pour labels
 
     for (let i = 0; i < levels.length; i++) {
-      const y = pad.t + (h / (levels.length - 1)) * i; // 0=haut, 4=bas
+      // on inverse le calcul pour que le label "oui" (i=4) soit en haut
+      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i); 
       ctx.beginPath();
       ctx.moveTo(pad.l, y);
       ctx.lineTo(pad.l + w, y);
@@ -303,7 +305,9 @@ async function initApp() {
       const histIdx = (history.length - points.length) + entryIdx; 
       const dateStr = history[histIdx]?.date || history[histIdx]?.key || "";
       if (dateStr) {
-        ctx.fillText(dateStr, x - 16, pad.t + h + 14); // petit offset
+        // on formate la date en JJ/MM pour compacter l'affichage
+        const formattedDate = dateStr.substring(0, 5); 
+        ctx.fillText(formattedDate, x - 16, pad.t + h + 14); // petit offset
       }
     }
 
@@ -313,7 +317,8 @@ async function initApp() {
     ctx.beginPath();
     points.forEach((p, i) => {
       const x = pad.l + i * step;
-      const y = pad.t + (h / (levels.length - 1)) * (levels.indexOf(p.v));
+      // on inverse le calcul pour que "oui" (p.idx=4) soit en haut
+      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
     ctx.stroke();
@@ -322,7 +327,8 @@ async function initApp() {
     ctx.fillStyle = "#1f2937";
     points.forEach((p, i) => {
       const x = pad.l + i * step;
-      const y = pad.t + (h / (levels.length - 1)) * (levels.indexOf(p.v));
+      // on inverse le calcul pour que "oui" (p.idx=4) soit en haut
+      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
       ctx.beginPath();
       ctx.arc(x, y, 2.5, 0, Math.PI * 2);
       ctx.fill();
