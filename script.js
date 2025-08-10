@@ -36,8 +36,8 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
   });
 
 async function initApp() {
-  // Stocker les valeurs de délai en mémoire pour les conserver entre les re-renders
-  window.__delayValues = {};
+  // ✅ Mémoire des délais sélectionnés (clé -> valeur)
+  window.__delayValues = window.__delayValues || {};
 
   // Titre dynamique
   document.getElementById("user-title").textContent =
@@ -145,7 +145,7 @@ async function initApp() {
     const formData = new FormData(form);
     const entries = Object.fromEntries(formData.entries());
 
-    // ✅ Fusionner les valeurs de délai stockées en mémoire avec les autres entrées
+    // ⬅️ ajoute les délais choisis via le menu
     Object.assign(entries, window.__delayValues || {});
 
     const selected = dateSelect.selectedOptions[0];
@@ -355,54 +355,126 @@ async function initApp() {
     ctx.stroke();
   }
 
-  // Helper pour ajouter le bouton "Délai"
+  // ✅ Nouvelle fonction addDelayUI
   function addDelayUI(wrapper, q) {
     const mode = document.getElementById("date-select").selectedOptions[0]?.dataset.mode || "daily";
-    // window.__delays n'est plus utilisé, les valeurs sont dans __delayValues
-    const label = q.id;
-    const key = (mode === "daily" ? `__delayDays__` : `__delayIter__`) + label;
+    const key = (mode === "daily" ? `__delayDays__` : `__delayIter__`) + q.id;
 
     const row = document.createElement("div");
-    row.className = "mt-2 flex items-center gap-3";
+    row.className = "mt-2 flex items-center gap-3 relative"; // relative pour ancrer le popover
+    wrapper.appendChild(row);
 
+    // Bouton
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "text-sm text-blue-600 hover:underline";
     btn.textContent = "⏱️ Délai";
     row.appendChild(btn);
 
+    // Info (prochaine échéance / délai choisi)
     const info = document.createElement("span");
     info.className = "text-xs text-gray-500";
-    // ✅ Gérer les deux cas potentiels
     const infos = [];
     if (q.scheduleInfo?.nextDate) infos.push(`Prochaine : ${q.scheduleInfo.nextDate}`);
     if (q.scheduleInfo?.nextIter != null && q.scheduleInfo?.currentIter != null)
       infos.push(`Prochaine itération : N=${q.scheduleInfo.nextIter}`);
-    info.textContent = infos.join(" — ");
-
-    // Bonus UX : réafficher la valeur de délai si elle est déjà stockée
-    if (window.__delayValues && window.__delayValues[key]) {
-      const n = window.__delayValues[key];
-      info.textContent = mode === "daily" ? `Délai choisi : ${n} j` : `Délai choisi : ${n} itérations`;
+    // réaffiche la valeur déjà choisie si existante
+    if (window.__delayValues[key] != null) {
+      const n = parseInt(window.__delayValues[key], 10);
+      if (!Number.isNaN(n)) {
+        infos.push(mode === "daily" ? `Délai choisi : ${n} j` : `Délai choisi : ${n} itérations`);
+      }
     }
-
+    info.textContent = infos.join(" — ") || "";
     row.appendChild(info);
 
-    btn.addEventListener("click", () => {
-      const msg = mode === "daily" ? "Délai en jours (0,1,2,3,7,14...)" : "Délai en itérations (0,1,2,3,5...)";
-      const raw = prompt(msg, "1");
-      if (raw === null) return;
-      const n = parseInt(raw, 10);
-      if (Number.isNaN(n) || n < 0) { alert("Nombre invalide"); return; }
+    // Popover (caché par défaut)
+    const pop = document.createElement("div");
+    pop.className = "absolute right-0 top-8 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 hidden";
+    pop.setAttribute("role", "menu");
+    row.appendChild(pop);
 
-      // ✅ Mémoriser simplement la valeur
+    // Options rapides
+    const options = mode === "daily"
+      ? [
+          { label: "Aujourd’hui (0 j)", value: 0 },
+          { label: "+1 j", value: 1 },
+          { label: "+2 j", value: 2 },
+          { label: "+3 j", value: 3 },
+          { label: "1 semaine", value: 7 },
+          { label: "2 semaines", value: 14 },
+          { label: "1 mois (~30 j)", value: 30 }
+        ]
+      : [
+          { label: "0", value: 0 },
+          { label: "1", value: 1 },
+          { label: "2", value: 2 },
+          { label: "3", value: 3 },
+          { label: "5", value: 5 },
+          { label: "8", value: 8 },
+          { label: "13", value: 13 }
+        ];
+
+    const grid = document.createElement("div");
+    grid.className = "p-2 grid grid-cols-2 gap-2";
+    pop.appendChild(grid);
+
+    const setValue = (n) => {
       window.__delayValues[key] = String(n);
-      info.textContent = mode === "daily" ? `Délai choisi : ${n} j` : `Délai choisi : ${n} itérations`;
-      console.log(`✅ Délai de ${n} ${mode === "daily" ? "jour(s)" : "itération(s)"} ajouté pour la question "${q.label}"`);
-      console.log("Valeurs de délai en mémoire :", window.__delayValues);
+      info.textContent = mode === "daily"
+        ? `Délai choisi : ${n} j`
+        : `Délai choisi : ${n} itérations`;
+      pop.classList.add("hidden");
+    };
+
+    options.forEach(opt => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "px-2 py-1 text-sm border border-gray-200 rounded hover:bg-gray-50";
+      b.textContent = opt.label;
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        setValue(opt.value);
+      });
+      grid.appendChild(b);
     });
 
-    wrapper.appendChild(row);
+    // Ligne d’actions
+    const actions = document.createElement("div");
+    actions.className = "border-t border-gray-100 p-2 flex items-center justify-between";
+    pop.appendChild(actions);
+
+    // Effacer (n=0 => le backend effacera la note → aucun délai)
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "text-xs text-red-600 hover:underline";
+    clearBtn.textContent = "Retirer le délai";
+    clearBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      setValue(0);
+      info.textContent = "Aucun délai";
+    });
+    actions.appendChild(clearBtn);
+
+    // Fermer
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "text-xs text-gray-600 hover:underline";
+    closeBtn.textContent = "Fermer";
+    closeBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      pop.classList.add("hidden");
+    });
+    actions.appendChild(closeBtn);
+
+    // Toggle popover
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      pop.classList.toggle("hidden");
+    });
+
+    // Fermer si clic à l’extérieur
+    document.addEventListener("click", () => pop.classList.add("hidden"), { once: true });
   }
 
   // Renderer commun (journalier & pratique)
@@ -424,12 +496,10 @@ async function initApp() {
       "oui": "bg-green-100 text-green-800",
       "plutot oui": "bg-green-50 text-green-700",
       "moyen": "bg-yellow-100 text-yellow-800",
-      "plutot non": "bg-red-100 text-red-700",
+      "plutot non": "bg-red-100 text-red-900",
       "non": "bg-red-200 text-red-900",
       "pas de reponse": "bg-gray-200 text-gray-700 italic"
     };
-
-    // ✅ La constante DELAYS a été retirée, elle n'est plus utilisée.
 
     (questions || []).forEach(q => {
       // Log détaillé pour chaque question
