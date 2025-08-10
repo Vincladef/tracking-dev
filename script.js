@@ -1,14 +1,15 @@
-// 🧑 Identifier l’utilisateur depuis l’URL
+// 🧑 Identifier l’utilisateur et l'ID de déploiement du script WebApp depuis l’URL
 const urlParams = new URLSearchParams(location.search);
 const user = urlParams.get("user")?.toLowerCase();
+const configScriptId = urlParams.get("id"); // Renommé pour plus de clarté
 
-if (!user) {
-  alert("❌ Aucun utilisateur indiqué !");
-  throw new Error("Utilisateur manquant");
+if (!user || !configScriptId) {
+  alert("❌ Utilisateur ou ID de script manquant dans l'URL !");
+  throw new Error("Utilisateur ou ID de script manquant");
 }
 
-// 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
-const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
+// 🌐 Récupération automatique de l’apiUrl depuis le Google Script
+const CONFIG_URL = `https://script.google.com/macros/s/${configScriptId}/exec`;
 
 let apiUrl = null;
 
@@ -135,8 +136,11 @@ async function initApp() {
   }
 
   // 📨 Soumission
-  document.getElementById("submitBtn").addEventListener("click", (e) => {
+  document.getElementById("submitBtn").addEventListener("click", async (e) => {
     e.preventDefault();
+
+    const btn = document.getElementById("submitBtn");
+    btn.disabled = true;
 
     const form = document.getElementById("daily-form");
     const formData = new FormData(form);
@@ -152,24 +156,33 @@ async function initApp() {
       entries._mode = "practice";
       entries._category = selected.dataset.category; // nom exact
     }
+    
+    // Ajoutez l'URL de l'API ici avant l'envoi
     entries.apiUrl = apiUrl;
 
     console.log("📦 Envoi des données au Worker...", entries);
 
-    fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
-      method: "POST",
-      body: JSON.stringify(entries),
-      headers: { "Content-Type": "application/json" }
-    })
-      .then(res => res.text())
-      .then(() => {
-        alert("✅ Réponses envoyées !");
-        console.log("✅ Réponses envoyées avec succès.");
-      })
-      .catch(err => {
-        alert("❌ Erreur d’envoi");
-        console.error("❌ Erreur lors de l’envoi des données :", err);
+    try {
+      await fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
+        method: "POST",
+        body: JSON.stringify(entries),
+        headers: { "Content-Type": "application/json" }
       });
+      alert("✅ Réponses envoyées !");
+      console.log("✅ Réponses envoyées avec succès.");
+
+      // Recharger le formulaire après l'envoi
+      if (selected?.dataset.mode === "daily") {
+        loadFormForDate(selected.dataset.date);
+      } else {
+        loadPracticeForm(selected.dataset.category);
+      }
+    } catch (err) {
+      alert("❌ Erreur d’envoi");
+      console.error("❌ Erreur lors de l’envoi des données :", err);
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   // =========================
@@ -227,26 +240,27 @@ async function initApp() {
 
   // Mini chart Likert dans l'historique
   function renderLikertChart(parentEl, history, normalize) {
-    // on prend max 30 points, ancien -> récent (gauche -> droite)
     const MAX_POINTS = 30;
-    // on inverse les niveaux pour que "oui" soit en haut et "non" en bas
     const levels = ["non", "plutot non", "moyen", "plutot oui", "oui"];
     const labelByNorm = {
       "non": "Non", "plutot non": "Plutôt non", "moyen": "Moyen",
       "plutot oui": "Plutôt oui", "oui": "Oui"
     };
 
-    const points = (history || [])
-      .slice(0, MAX_POINTS)         // récent->ancien fourni par backend → on coupe
-      .reverse()                  // puis on inverse pour ancien->récent
+    // Nouveau : On prépare l'historique une seule fois
+    const windowHist = (history || [])
+      .slice(0, MAX_POINTS)
+      .reverse(); // ancien -> récent
+
+    const points = windowHist
       .map(e => {
         const v = normalize(e.value);
         const idx = levels.indexOf(v);
-        return (idx === -1) ? null : { v, idx };
+        return idx === -1 ? null : { v, idx };
       })
       .filter(Boolean);
 
-    if (points.length < 2) return; // rien à tracer
+    if (points.length < 2) return;
 
     // Canvas retina friendly
     const dpr = window.devicePixelRatio || 1;
@@ -269,20 +283,18 @@ async function initApp() {
     ctx.fillRect(0, 0, cssW, cssH);
 
     // grille horizontale + labels Likert
-    ctx.strokeStyle = "#e5e7eb"; // gris clair
+    ctx.strokeStyle = "#e5e7eb";
     ctx.lineWidth = 1;
     ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
-    ctx.fillStyle = "#374151"; // gris foncé pour labels
+    ctx.fillStyle = "#374151";
 
     for (let i = 0; i < levels.length; i++) {
-      // on inverse le calcul pour que le label "oui" (i=4) soit en haut
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i);
       ctx.beginPath();
       ctx.moveTo(pad.l, y);
       ctx.lineTo(pad.l + w, y);
       ctx.stroke();
 
-      // label à gauche
       const lab = labelByNorm[levels[i]] || levels[i];
       ctx.fillText(lab, 8, y + 4);
     }
@@ -290,7 +302,7 @@ async function initApp() {
     // grille verticale (ticks x)
     const n = points.length;
     const step = n > 1 ? w / (n - 1) : w;
-    const xTickEvery = Math.max(1, Math.floor(n / 6)); // ~6 ticks max
+    const xTickEvery = Math.max(1, Math.floor(n / 6));
     ctx.strokeStyle = "#f3f4f6";
     for (let i = 0; i < n; i += xTickEvery) {
       const x = pad.l + i * step;
@@ -302,26 +314,22 @@ async function initApp() {
 
     // labels de dates sous l'axe X
     ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
-    ctx.fillStyle = "#6b7280"; // gris pour les dates
+    ctx.fillStyle = "#6b7280";
     for (let i = 0; i < n; i += xTickEvery) {
       const x = pad.l + i * step;
-      const entryIdx = i; // correspond à l'index dans points
-      const histIdx = (history.length - points.length) + entryIdx;
-      const dateStr = history[histIdx]?.date || history[histIdx]?.key || "";
-      if (dateStr) {
-        // on formate la date ou l'itération
-        const formattedLabel = dateStr.includes('/') ? dateStr.substring(0, 5) : `N=${dateStr}`;
-        ctx.fillText(formattedLabel, x - 16, pad.t + h + 14); // petit offset
-      }
+      const raw = windowHist[i]?.date || windowHist[i]?.key || "";
+      // Nouvelle logique pour extraire la date
+      const m = raw.match(/\((\d{2}\/\d{2}\/\d{4})\)/) || raw.match(/^(\d{2}\/\d{2}\/\d{4})$/);
+      const label = m ? m[1].slice(0, 5) : (raw ? `N=${raw}` : "");
+      if (label) ctx.fillText(label, x - 16, pad.t + h + 14);
     }
 
     // courbe
-    ctx.strokeStyle = "#2563eb"; // bleu
+    ctx.strokeStyle = "#2563eb";
     ctx.lineWidth = 2;
     ctx.beginPath();
     points.forEach((p, i) => {
       const x = pad.l + i * step;
-      // on inverse le calcul pour que "oui" (p.idx=4) soit en haut
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
@@ -331,14 +339,13 @@ async function initApp() {
     ctx.fillStyle = "#1f2937";
     points.forEach((p, i) => {
       const x = pad.l + i * step;
-      // on inverse le calcul pour que "oui" (p.idx=4) soit en haut
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
       ctx.beginPath();
       ctx.arc(x, y, 2.5, 0, Math.PI * 2);
       ctx.fill();
     });
 
-    // axe x (nominal, on laisse sans labels de dates pour rester compact)
+    // axe x (nominal)
     ctx.strokeStyle = "#9ca3af";
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -352,6 +359,11 @@ async function initApp() {
     const container = document.getElementById("daily-form");
     container.innerHTML = "";
     console.log(`✍️ Rendu de ${questions.length} question(s)`);
+
+    // Sécurité : S'assurer que q.history est toujours un tableau
+    questions.forEach(q => {
+      if (!Array.isArray(q.history)) q.history = [];
+    });
 
     const normalize = (str) =>
       (str || "")
@@ -446,12 +458,8 @@ async function initApp() {
         let input;
         const type = (q.type || "").toLowerCase();
 
-        if (type.includes("oui")) {
-          input = document.createElement("div");
-          input.className = "space-x-6 text-gray-700";
-          input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-           <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
-        } else if (type.includes("menu") || type.includes("likert")) {
+        // Ajout de la priorité pour les menus Likert
+        if (type.includes("menu") || type.includes("likert")) {
           input = document.createElement("select");
           input.name = q.id;
           input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
@@ -462,6 +470,11 @@ async function initApp() {
             if (opt === referenceAnswer) option.selected = true;
             input.appendChild(option);
           });
+        } else if (type.includes("oui")) {
+          input = document.createElement("div");
+          input.className = "space-x-6 text-gray-700";
+          input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
+             <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
         } else if (type.includes("plus long")) {
           input = document.createElement("textarea");
           input.name = q.id;
@@ -488,7 +501,8 @@ async function initApp() {
         toggleBtn.textContent = "📓 Voir l’historique des réponses";
 
         const historyBlock = document.createElement("div");
-        historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
+        // Ajout de la classe overflow-x-auto pour le défilement horizontal
+        historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden overflow-x-auto";
 
         // Graphe Likert + 2 stats compactes (sur 30 dernières)
         renderLikertChart(historyBlock, q.history, normalize);
