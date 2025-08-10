@@ -294,6 +294,19 @@ async function initApp() {
       ctx.stroke();
     }
 
+    // labels de dates sous l'axe X
+    ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+    ctx.fillStyle = "#6b7280"; // gris pour les dates
+    for (let i = 0; i < n; i += xTickEvery) {
+      const x = pad.l + i * step;
+      const entryIdx = i; // correspond à l'index dans points
+      const histIdx = (history.length - points.length) + entryIdx; 
+      const dateStr = history[histIdx]?.date || history[histIdx]?.key || "";
+      if (dateStr) {
+        ctx.fillText(dateStr, x - 16, pad.t + h + 14); // petit offset
+      }
+    }
+
     // courbe
     ctx.strokeStyle = "#2563eb"; // bleu
     ctx.lineWidth = 2;
