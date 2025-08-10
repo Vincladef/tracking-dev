@@ -21,11 +21,11 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
     }
 
     apiUrl = config.apiurl;
-    console.log("✅ apiUrl récupérée :", apiUrl);
+    console.log("✅ API URL récupérée :", apiUrl);
 
     if (!apiUrl) {
       alert("❌ Aucune URL WebApp trouvée pour l’utilisateur.");
-      throw new Error("apiUrl introuvable");
+      throw new Error("API URL introuvable");
     }
 
     initApp();
@@ -50,6 +50,7 @@ async function initApp() {
 
   // ➡️ Remplir le select avec : Dates (7j) + (optionnel) Mode pratique — catégories
   async function buildCombinedSelect() {
+    console.log("🛠️ Création du sélecteur de date et de mode...");
     const sel = document.getElementById("date-select");
     sel.innerHTML = "";
 
@@ -109,6 +110,7 @@ async function initApp() {
       ph.selected = false;
       firstDate.selected = true;
     }
+    console.log("✅ Sélecteur de mode et de date prêt.");
   }
   
   await buildCombinedSelect();
@@ -124,8 +126,10 @@ async function initApp() {
     const selected = sel.selectedOptions[0];
     const mode = selected.dataset.mode || "daily";
     if (mode === "daily") {
+      console.log(`➡️ Changement de mode : Journalier, date=${selected.dataset.date}`);
       loadFormForDate(selected.dataset.date);
     } else {
+      console.log(`➡️ Changement de mode : Pratique, catégorie=${selected.dataset.category}`);
       loadPracticeForm(selected.dataset.category);
     }
   }
@@ -150,16 +154,21 @@ async function initApp() {
     }
     entries.apiUrl = apiUrl;
 
+    console.log("📦 Envoi des données au Worker...", entries);
+
     fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
       method: "POST",
       body: JSON.stringify(entries),
       headers: { "Content-Type": "application/json" }
     })
       .then(res => res.text())
-      .then(() => alert("✅ Réponses envoyées !"))
+      .then(() => {
+        alert("✅ Réponses envoyées !");
+        console.log("✅ Réponses envoyées avec succès.");
+      })
       .catch(err => {
         alert("❌ Erreur d’envoi");
-        console.error(err);
+        console.error("❌ Erreur lors de l’envoi des données :", err);
       });
   });
 
@@ -183,6 +192,7 @@ async function initApp() {
     clearFormUI();
     const loader = document.getElementById("loader");
     if (loader) loader.classList.remove("hidden");
+    console.log(`📡 Chargement des questions pour la date : ${dateISO}`);
 
     fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}`)
       .then(res => res.json())
@@ -198,6 +208,7 @@ async function initApp() {
     clearFormUI();
     const loader = document.getElementById("loader");
     if (loader) loader.classList.remove("hidden");
+    console.log(`📡 Chargement des questions pour la catégorie : ${category}`);
 
     try {
       const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`);
@@ -214,6 +225,7 @@ async function initApp() {
   function renderQuestions(questions) {
     const container = document.getElementById("daily-form");
     container.innerHTML = "";
+    console.log(`✍️ Rendu de ${questions.length} question(s)`);
 
     const normalize = (str) =>
       (str || "")
@@ -241,6 +253,83 @@ async function initApp() {
       label.className = "block text-lg font-semibold mb-2";
       label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
       wrapper.appendChild(label);
+      
+      // — Résumé visuel (mini-graphe) —
+      // mapping de score (utilise la même normalisation que plus bas)
+      const SCORE_MAP = {
+        "oui": 1,
+        "plutot oui": 0.75,
+        "moyen": 0.25,
+        "plutot non": 0,
+        "non": -1,
+        "pas de reponse": 0
+      };
+      
+      const seriesRaw = (q.history || []).map(h => SCORE_MAP[normalize(h.value)]);
+      
+      // On garde les N derniers points pour le graphe (ex : 30) et on les inverse
+      // pour dessiner de gauche->droite = ancien->récent (plus lisible).
+      const MAX_POINTS = 30;
+      const series = seriesRaw.filter(v => typeof v === "number").slice(0, MAX_POINTS).reverse();
+      
+      if (series.length > 1) {
+        console.log(`📊 Dessin d'un graphe pour la question "${q.label}" avec ${series.length} points.`);
+        const dpr = window.devicePixelRatio || 1;
+        const cssW = 500, cssH = 60;
+        
+        const canvas = document.createElement("canvas");
+        canvas.width = cssW * dpr;
+        canvas.height = cssH * dpr;
+        canvas.style.width = cssW + "px";
+        canvas.style.height = cssH + "px";
+        canvas.className = "w-full block mt-1";
+        wrapper.appendChild(canvas);
+
+        const ctx = canvas.getContext("2d");
+        ctx.scale(dpr, dpr);
+        
+        const padX = 6, padY = 6;
+        const w = cssW - padX * 2;
+        const h = cssH - padY * 2;
+
+        const minY = -1, maxY = 1; // plage des scores
+        const xStep = series.length > 1 ? (w / (series.length - 1)) : w;
+
+        // fond discret
+        ctx.fillStyle = "#f9fafb";
+        ctx.fillRect(0, 0, cssW, cssH);
+
+        // ligne zéro
+        const y0 = padY + h * (1 - ((0 - minY) / (maxY - minY)));
+        ctx.strokeStyle = "#e5e7eb";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padX, y0);
+        ctx.lineTo(padX + w, y0);
+        ctx.stroke();
+
+        // courbe
+        ctx.strokeStyle = "#2563eb"; // bleu Tailwind-ish
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        series.forEach((v, i) => {
+          const x = padX + i * xStep;
+          const y = padY + h * (1 - ((v - minY) / (maxY - minY)));
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // points
+        ctx.fillStyle = "#1f2937";
+        series.forEach((v, i) => {
+          const x = padX + i * xStep;
+          const y = padY + h * (1 - ((v - minY) / (maxY - minY)));
+          ctx.beginPath();
+          ctx.arc(x, y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+
 
       // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
       let referenceAnswer = "";
@@ -311,6 +400,7 @@ async function initApp() {
 
       // 📓 Historique (compatible daily et practice)
       if (q.history && q.history.length > 0) {
+        console.log(`📖 Affichage de l'historique pour "${q.label}" (${q.history.length} entrées)`);
         const toggleBtn = document.createElement("button");
         toggleBtn.type = "button";
         toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
@@ -319,8 +409,9 @@ async function initApp() {
         const historyBlock = document.createElement("div");
         historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
 
-        q.history.forEach(entry => {
-          // entry.date (daily) OU entry.key (practice: "Catégorie N")
+        const LIMIT = 10;
+
+        q.history.forEach((entry, idx) => {
           const key = entry.date || entry.key || "";
           const val = entry.value;
           const normalized = normalize(val);
@@ -328,10 +419,35 @@ async function initApp() {
 
           const entryDiv = document.createElement("div");
           entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
+          if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history"); // masqué par défaut
+
           entryDiv.innerHTML = `<strong>${key}</strong> – ${val}`;
           historyBlock.appendChild(entryDiv);
         });
 
+        if (q.history.length > LIMIT) {
+          const moreBtn = document.createElement("button");
+          moreBtn.type = "button";
+          moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
+          let expanded = false;
+          const rest = q.history.length - LIMIT;
+
+          const setLabel = () => {
+            moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
+          };
+          setLabel();
+
+          moreBtn.addEventListener("click", () => {
+            expanded = !expanded;
+            historyBlock.querySelectorAll(".extra-history").forEach(el => {
+              el.classList.toggle("hidden", !expanded);
+            });
+            setLabel();
+          });
+
+          historyBlock.appendChild(moreBtn);
+        }
+        
         toggleBtn.addEventListener("click", () => {
           historyBlock.classList.toggle("hidden");
         });
@@ -344,5 +460,6 @@ async function initApp() {
     });
 
     showFormUI();
+    console.log("✅ Rendu des questions terminé.");
   }
 }
