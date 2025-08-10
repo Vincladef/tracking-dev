@@ -112,7 +112,7 @@ async function initApp() {
     }
     console.log("✅ Sélecteur de mode et de date prêt.");
   }
-  
+
   await buildCombinedSelect();
 
   // État initial
@@ -173,7 +173,7 @@ async function initApp() {
   });
 
   // =========================
-  //   Chargements / Renders
+  //   Chargements / Renders
   // =========================
 
   function clearFormUI() {
@@ -197,8 +197,8 @@ async function initApp() {
     fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}`)
       .then(res => res.json())
       .then(questions => {
-          console.log(`✅ ${questions.length} question(s) chargée(s).`);
-          renderQuestions(questions);
+        console.log(`✅ ${questions.length} question(s) chargée(s).`);
+        renderQuestions(questions);
       })
       .catch(err => {
         document.getElementById("loader")?.classList.add("hidden");
@@ -224,7 +224,7 @@ async function initApp() {
       alert("❌ Erreur lors du chargement du formulaire de pratique.");
     }
   }
-  
+
   // Mini chart Likert dans l'historique
   function renderLikertChart(parentEl, history, normalize) {
     // on prend max 30 points, ancien -> récent (gauche -> droite)
@@ -237,8 +237,8 @@ async function initApp() {
     };
 
     const points = (history || [])
-      .slice(0, MAX_POINTS)         // récent->ancien fourni par backend → on coupe
-      .reverse()                  // puis on inverse pour ancien->récent
+      .slice(0, MAX_POINTS)         // récent->ancien fourni par backend → on coupe
+      .reverse()                  // puis on inverse pour ancien->récent
       .map(e => {
         const v = normalize(e.value);
         const idx = levels.indexOf(v);
@@ -276,7 +276,7 @@ async function initApp() {
 
     for (let i = 0; i < levels.length; i++) {
       // on inverse le calcul pour que le label "oui" (i=4) soit en haut
-      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i); 
+      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i);
       ctx.beginPath();
       ctx.moveTo(pad.l, y);
       ctx.lineTo(pad.l + w, y);
@@ -306,12 +306,12 @@ async function initApp() {
     for (let i = 0; i < n; i += xTickEvery) {
       const x = pad.l + i * step;
       const entryIdx = i; // correspond à l'index dans points
-      const histIdx = (history.length - points.length) + entryIdx; 
+      const histIdx = (history.length - points.length) + entryIdx;
       const dateStr = history[histIdx]?.date || history[histIdx]?.key || "";
       if (dateStr) {
-        // on formate la date en JJ/MM pour compacter l'affichage
-        const formattedDate = dateStr.substring(0, 5); 
-        ctx.fillText(formattedDate, x - 16, pad.t + h + 14); // petit offset
+        // on formate la date ou l'itération
+        const formattedLabel = dateStr.includes('/') ? dateStr.substring(0, 5) : `N=${dateStr}`;
+        ctx.fillText(formattedLabel, x - 16, pad.t + h + 14); // petit offset
       }
     }
 
@@ -355,12 +355,12 @@ async function initApp() {
 
     const normalize = (str) =>
       (str || "")
-        .normalize("NFD")
-        .replace(/[̀-ͯ]/g, "")
-        .replace(/[\u00A0\u202F\u200B]/g, " ")
-        .replace(/\s+/g, " ")
-        .toLowerCase()
-        .trim();
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[\u00A0\u202F\u200B]/g, " ")
+      .replace(/\s+/g, " ")
+      .toLowerCase()
+      .trim();
 
     const colorMap = {
       "oui": "bg-green-100 text-green-800",
@@ -370,42 +370,40 @@ async function initApp() {
       "non": "bg-red-200 text-red-900",
       "pas de reponse": "bg-gray-200 text-gray-700 italic"
     };
-    
+
     const DELAYS = [0, 1, 2, 3, 5, 8, 13];
 
     (questions || []).forEach(q => {
       // Log détaillé pour chaque question
       console.groupCollapsed(`[Question] Traitement de "${q.label}"`);
-      
+
       const selectedMode = document.getElementById("date-select")
         .selectedOptions[0]?.dataset.mode || "daily";
-      
+
       console.log("-> Type de question :", q.type);
       console.log("-> Est Répétition Espacée :", q.isSpaced);
-      
-      if (q.isSpaced && q.spacedInfo) {
-        const delay = DELAYS[q.spacedInfo.score] ?? "?";
 
-        if (selectedMode === "practice" && "lastIter" in q.spacedInfo) {
-          console.log("-> Score de Répétition :", q.spacedInfo.score);
-          console.log(`-> Prochain délai : ${delay} itération(s)`);
-          console.log("-> Dernière itération :", q.spacedInfo.lastIter ?? "—");
-          console.log("-> Prochaine itération due :", q.spacedInfo.nextIter ?? "—");
-          console.log("-> Itération actuelle :", q.spacedInfo.currentIter ?? "—");
+      if (q.isSpaced && q.spacedInfo) {
+        if (selectedMode === "practice") {
+          const s = q.spacedInfo.streak ?? 0;
+          const delay = q.spacedInfo.delayIter ?? 0;
+          console.log("-> Streak positif (itérations d'affilée):", s);
+          console.log(`-> Délai avant réapparition: ${delay} itération(s)`);
         } else {
+          const delay = DELAYS[q.spacedInfo.score] ?? "?";
           console.log("-> Score de Répétition :", q.spacedInfo.score);
           console.log(`-> Prochain délai : ${delay} jour(s)`);
           console.log("-> Dernière réponse :", q.spacedInfo.lastDate ?? "—");
           console.log("-> Prochaine date due :", q.spacedInfo.nextDate ?? "—");
         }
       }
-      
+
       console.log("-> Est-elle affichée ? :", !q.skipped);
       if (q.skipped) {
         console.log("-> Raison du masquage :", q.reason);
       }
       console.groupEnd();
-      
+
       const wrapper = document.createElement("div");
       wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
 
@@ -413,22 +411,22 @@ async function initApp() {
       label.className = "block text-lg font-semibold mb-2";
       label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
       wrapper.appendChild(label);
-      
+
       // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
       let referenceAnswer = "";
       if (q.history && Array.isArray(q.history)) {
         const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
         if (dateISO) {
-           const entry = q.history.find(entry => {
-             if (entry?.date) {
-               const [dd, mm, yyyy] = entry.date.split("/");
-               const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-               return entryDateISO === dateISO;
-             }
-             return false;
-           });
-           referenceAnswer = entry?.value || "";
-         }
+          const entry = q.history.find(entry => {
+            if (entry?.date) {
+              const [dd, mm, yyyy] = entry.date.split("/");
+              const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+              return entryDateISO === dateISO;
+            }
+            return false;
+          });
+          referenceAnswer = entry?.value || "";
+        }
       }
 
       if (q.skipped) {
@@ -452,7 +450,7 @@ async function initApp() {
           input = document.createElement("div");
           input.className = "space-x-6 text-gray-700";
           input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-            <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
+           <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
         } else if (type.includes("menu") || type.includes("likert")) {
           input = document.createElement("select");
           input.name = q.id;
@@ -494,7 +492,7 @@ async function initApp() {
 
         // Graphe Likert + 2 stats compactes (sur 30 dernières)
         renderLikertChart(historyBlock, q.history, normalize);
-        
+
         const LIMIT = 10;
         const WINDOW = 30;
         const badge = (title, value, tone="blue") => {
@@ -513,13 +511,13 @@ async function initApp() {
         };
         const POSITIVE = new Set(["oui","plutot oui"]);
         const windowHist = (q.history || []).slice(0, WINDOW);
-        
+
         let currentStreak = 0;
         for (const e of windowHist) {
           if (POSITIVE.has(normalize(e.value))) currentStreak++;
           else break;
         }
-        
+
         const counts = {};
         const order = ["non","plutot non","moyen","plutot oui","oui"];
         for (const e of windowHist) {
@@ -551,7 +549,7 @@ async function initApp() {
           entryDiv.innerHTML = `<strong>${key}</strong> – ${val}`;
           historyBlock.appendChild(entryDiv);
         });
-        
+
         if (q.history && q.history.length > LIMIT) {
           const moreBtn = document.createElement("button");
           moreBtn.type = "button";
@@ -566,7 +564,7 @@ async function initApp() {
           });
           historyBlock.appendChild(moreBtn);
         }
-        
+
         toggleBtn.addEventListener("click", () => {
           historyBlock.classList.toggle("hidden");
         });
