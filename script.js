@@ -376,13 +376,16 @@ async function initApp() {
     (questions || []).forEach(q => {
       // Log détaillé pour chaque question
       console.groupCollapsed(`[Question] Traitement de "${q.label}"`);
-      const selectedMode = document.getElementById("date-select").selectedOptions[0]?.dataset.mode || "daily";
+      
+      const selectedMode = document.getElementById("date-select")
+        .selectedOptions[0]?.dataset.mode || "daily";
       
       console.log("-> Type de question :", q.type);
       console.log("-> Est Répétition Espacée :", q.isSpaced);
       
       if (q.isSpaced && q.spacedInfo) {
         const delay = DELAYS[q.spacedInfo.score] ?? "?";
+
         if (selectedMode === "practice" && "lastIter" in q.spacedInfo) {
           console.log("-> Score de Répétition :", q.spacedInfo.score);
           console.log(`-> Prochain délai : ${delay} itération(s)`);
@@ -489,13 +492,11 @@ async function initApp() {
         const historyBlock = document.createElement("div");
         historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
 
-        // ==== Graphe Likert + 2 stats compactes (sur 30 dernières) ====
-        // 1) Graphe Likert dans l'historique
+        // Graphe Likert + 2 stats compactes (sur 30 dernières)
         renderLikertChart(historyBlock, q.history, normalize);
         
-        // 2) Badges : série positive actuelle & réponse la plus fréquente
-        const LIMIT = 10;          // visibles par défaut dans la liste
-        const WINDOW = 30;         // fenêtre d'analyse pour les badges
+        const LIMIT = 10;
+        const WINDOW = 30;
         const badge = (title, value, tone="blue") => {
           const div = document.createElement("div");
           const tones = {
@@ -511,18 +512,16 @@ async function initApp() {
           return div;
         };
         const POSITIVE = new Set(["oui","plutot oui"]);
-        const windowHist = (q.history || []).slice(0, WINDOW); // récent -> ancien
+        const windowHist = (q.history || []).slice(0, WINDOW);
         
-        // Série actuelle (positifs)
         let currentStreak = 0;
         for (const e of windowHist) {
           if (POSITIVE.has(normalize(e.value))) currentStreak++;
           else break;
         }
         
-        // Réponse la plus fréquente (mode) sur la fenêtre
         const counts = {};
-        const order = ["non","plutot non","moyen","plutot oui","oui"]; // tie-break logique
+        const order = ["non","plutot non","moyen","plutot oui","oui"];
         for (const e of windowHist) {
           const v = normalize(e.value);
           counts[v] = (counts[v] || 0) + 1;
@@ -539,7 +538,7 @@ async function initApp() {
         if (best) statsWrap.appendChild(badge("Réponse la plus fréquente", pretty[best] || best, "purple"));
         historyBlock.appendChild(statsWrap);
 
-        // ==== Liste (10 visibles) + bouton Afficher plus / Réduire ====
+        // Liste (10 visibles) + bouton Afficher plus / Réduire
         (q.history || []).forEach((entry, idx) => {
           const key = entry.date || entry.key || "";
           const val = entry.value;
