@@ -371,20 +371,32 @@ async function initApp() {
       "pas de reponse": "bg-gray-200 text-gray-700 italic"
     };
     
-    const DELAYS = [0, 1, 2, 3, 5, 8, 13]; // Réplication de la constante côté client
+    const DELAYS = [0, 1, 2, 3, 5, 8, 13];
 
     (questions || []).forEach(q => {
       // Log détaillé pour chaque question
       console.groupCollapsed(`[Question] Traitement de "${q.label}"`);
+      const selectedMode = document.getElementById("date-select").selectedOptions[0]?.dataset.mode || "daily";
+      
       console.log("-> Type de question :", q.type);
       console.log("-> Est Répétition Espacée :", q.isSpaced);
+      
       if (q.isSpaced && q.spacedInfo) {
-        console.log("-> Score de Répétition :", q.spacedInfo.score);
-        const delay = DELAYS[q.spacedInfo.score] || "inconnu";
-        console.log("-> Prochain délai :", delay + " jours");
-        console.log("-> Dernière réponse :", q.spacedInfo.lastDate);
-        console.log("-> Prochaine date due :", q.spacedInfo.nextDate);
+        const delay = DELAYS[q.spacedInfo.score] ?? "?";
+        if (selectedMode === "practice" && "lastIter" in q.spacedInfo) {
+          console.log("-> Score de Répétition :", q.spacedInfo.score);
+          console.log(`-> Prochain délai : ${delay} itération(s)`);
+          console.log("-> Dernière itération :", q.spacedInfo.lastIter ?? "—");
+          console.log("-> Prochaine itération due :", q.spacedInfo.nextIter ?? "—");
+          console.log("-> Itération actuelle :", q.spacedInfo.currentIter ?? "—");
+        } else {
+          console.log("-> Score de Répétition :", q.spacedInfo.score);
+          console.log(`-> Prochain délai : ${delay} jour(s)`);
+          console.log("-> Dernière réponse :", q.spacedInfo.lastDate ?? "—");
+          console.log("-> Prochaine date due :", q.spacedInfo.nextDate ?? "—");
+        }
       }
+      
       console.log("-> Est-elle affichée ? :", !q.skipped);
       if (q.skipped) {
         console.log("-> Raison du masquage :", q.reason);
