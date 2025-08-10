@@ -173,7 +173,7 @@ async function initApp() {
   });
 
   // =========================
-  //   Chargements / Renders
+  //   Chargements / Renders
   // =========================
 
   function clearFormUI() {
@@ -196,7 +196,10 @@ async function initApp() {
 
     fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}`)
       .then(res => res.json())
-      .then(renderQuestions)
+      .then(questions => {
+          console.log(`✅ ${questions.length} question(s) chargée(s).`);
+          renderQuestions(questions);
+      })
       .catch(err => {
         document.getElementById("loader")?.classList.add("hidden");
         console.error(err);
@@ -213,6 +216,7 @@ async function initApp() {
     try {
       const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`);
       const questions = await res.json();
+      console.log(`✅ ${questions.length} question(s) de pratique chargée(s).`);
       renderQuestions(questions);
     } catch (e) {
       document.getElementById("loader")?.classList.add("hidden");
@@ -233,8 +237,8 @@ async function initApp() {
     };
 
     const points = (history || [])
-      .slice(0, MAX_POINTS)           // récent->ancien fourni par backend → on coupe
-      .reverse()                      // puis on inverse pour ancien->récent
+      .slice(0, MAX_POINTS)         // récent->ancien fourni par backend → on coupe
+      .reverse()                  // puis on inverse pour ancien->récent
       .map(e => {
         const v = normalize(e.value);
         const idx = levels.indexOf(v);
@@ -366,8 +370,27 @@ async function initApp() {
       "non": "bg-red-200 text-red-900",
       "pas de reponse": "bg-gray-200 text-gray-700 italic"
     };
+    
+    const DELAYS = [0, 1, 2, 3, 5, 8, 13]; // Réplication de la constante côté client
 
     (questions || []).forEach(q => {
+      // Log détaillé pour chaque question
+      console.groupCollapsed(`[Question] Traitement de "${q.label}"`);
+      console.log("-> Type de question :", q.type);
+      console.log("-> Est Répétition Espacée :", q.isSpaced);
+      if (q.isSpaced && q.spacedInfo) {
+        console.log("-> Score de Répétition :", q.spacedInfo.score);
+        const delay = DELAYS[q.spacedInfo.score] || "inconnu";
+        console.log("-> Prochain délai :", delay + " jours");
+        console.log("-> Dernière réponse :", q.spacedInfo.lastDate);
+        console.log("-> Prochaine date due :", q.spacedInfo.nextDate);
+      }
+      console.log("-> Est-elle affichée ? :", !q.skipped);
+      if (q.skipped) {
+        console.log("-> Raison du masquage :", q.reason);
+      }
+      console.groupEnd();
+      
       const wrapper = document.createElement("div");
       wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
 
@@ -390,7 +413,7 @@ async function initApp() {
              return false;
            });
            referenceAnswer = entry?.value || "";
-        }
+         }
       }
 
       if (q.skipped) {
