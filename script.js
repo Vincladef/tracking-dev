@@ -1,407 +1,348 @@
-// ============================
-//  Constantes & utilitaires
-// ============================
-const CONFIG_SHEET_ID = '1D9M3IEPtD7Vbdt7THBvNm8CiQ3qdrelyR-EdgNmd6go';
+// 🧑 Identifier l’utilisateur depuis l’URL
+const urlParams = new URLSearchParams(location.search);
+const user = urlParams.get("user")?.toLowerCase();
 
-const ANSWER_VALUES = {
-  "oui": 1,
-  "plutôt oui": 0.75,
-  "moyen": 0.25,
-  "non": -1,
-  "plutôt non": 0,
-  "pas de reponse": 0
-};
-const DELAYS = [0, 1, 2, 3, 5, 8, 13];
-const JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
-
-function clean(str) {
-  return (str || "")
-    .toString()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[\u00A0\u202F\u200B]/g, " ")
-    .replace(/\s+/g, " ")
-    .toLowerCase()
-    .trim();
+if (!user) {
+  alert("❌ Aucun utilisateur indiqué !");
+  throw new Error("Utilisateur manquant");
 }
 
-// ============================
-//  doGet — lecture
-// ============================
-function doGet(e) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Tracking');
-  const lastRow = sheet.getLastRow();
-  const lastCol = sheet.getLastColumn();
-  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  const data = sheet.getRange(2, 1, Math.max(0, lastRow - 1), lastCol).getValues();
+// 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
+const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
 
-  // ---------- MODE PRATIQUE (itérations) ----------
-  if (clean(e?.parameter?.mode) === "practice") {
-    const CAT_COL = 1;  // B (0-index)
-    const TYPE_COL = 2; // C
-    const FREQ_COL = 3; // D
-    const LABEL_COL = 4;// E
+let apiUrl = null;
 
-    // a) Liste des catégories
-    if (!e?.parameter?.category) {
-      const categoriesSet = {};
-      data.forEach(row => {
-        const freq = clean(row[FREQ_COL]);
-        const cat = (row[CAT_COL] || "").toString().trim();
-        if (!cat) return;
-        if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) {
-          categoriesSet[cat] = true;
-        }
-      });
-      const categories = Object.keys(categoriesSet);
-      return ContentService
-        .createTextOutput(JSON.stringify(categories))
-        .setMimeType(ContentService.MimeType.JSON);
+fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
+  .then(res => res.json())
+  .then(config => {
+    if (config.error) {
+      alert(`❌ Erreur: ${config.error}`);
+      throw new Error(config.error);
     }
 
-    // b) Questions d'une catégorie
-    const selectedCat = (e.parameter.category || "").toString().trim();
+    apiUrl = config.apiurl;
+    console.log("✅ apiUrl récupérée :", apiUrl);
 
-    const out = [];
-    data.forEach(row => {
-      const freq = clean(row[FREQ_COL]);
-      const cat = (row[CAT_COL] || "").toString().trim();
-      if (!cat || cat !== selectedCat) return;
-      if (!(freq.includes("pratique deliberee") || freq.includes("pratique délibérée"))) return;
-
-      const type = row[TYPE_COL] || "";
-      const label = row[LABEL_COL] || "";
-      if (!label) return;
-
-      // Historique : on récupère colonnes "Catégorie n (dd/MM/yyyy)" ET colonnes date,
-      // puis on trie du plus récent au plus ancien.
-      const historyRaw = [];
-      const catNorm = clean(selectedCat);
-      for (let c = 5; c < headers.length; c++) { // F → fin (ordre naturel)
-        const rawHeader = String(headers[c] || "");
-        const headerNorm = clean(rawHeader);
-        const val = row[c];
-        if (val === "" || val === null || val === undefined) continue;
-
-        let ts = null;
-
-        // 1) Colonnes "Catégorie n (dd/MM/yyyy)"
-        const m = rawHeader.match(/\((\d{2}\/\d{2}\/\d{4})\)/);
-        if (headerNorm.startsWith(catNorm) && m) {
-          const [dd, mm, yyyy] = m[1].split("/");
-          ts = new Date(`${yyyy}-${mm}-${dd}`).getTime();
-          historyRaw.push({ key: rawHeader, value: val, ts });
-          continue;
-        }
-
-        // 2) Colonnes Date dd/MM/yyyy (ancien format)
-        if (/^\d{2}\/\d{2}\/\d{4}$/.test(rawHeader)) {
-          const [dd, mm, yyyy] = rawHeader.split("/");
-          ts = new Date(`${yyyy}-${mm}-${dd}`).getTime();
-          historyRaw.push({ key: rawHeader, value: val, ts });
-        }
-      }
-      // Tri décroissant (plus récent en premier)
-      historyRaw.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-
-      // on renvoie sans le champ ts
-      const history = historyRaw.map(({ key, value }) => ({ key, value }));
-
-      out.push({
-        id: label,
-        label,
-        type,
-        history
-      });
-    });
-
-    return ContentService
-      .createTextOutput(JSON.stringify(out))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  // ---------- MODE JOURNALIER (inchangé) ----------
-  const queryDate = e?.parameter?.date;
-  const referenceDate = queryDate ? new Date(queryDate) : new Date();
-  const refDayName = referenceDate.toLocaleDateString("fr-FR", { weekday: "long" }).toLowerCase();
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  referenceDate.setHours(0, 0, 0, 0);
-  const isToday = referenceDate.getTime() === today.getTime();
-  const refDateOnly = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
-
-  function computeScoreAndLastDate(row) {
-    let totalScore = 0;
-    let lastDate = null;
-    for (let col = headers.length - 1; col >= 5; col--) {
-      const answer = clean(row[col]);
-      if (!answer) continue;
-      const score = ANSWER_VALUES[answer] ?? 0;
-      totalScore += score;
-
-      const dateStr = headers[col];
-      const [d, m, y] = (dateStr || "").split("/");
-      if (d && m && y) {
-        const dObj = new Date(`${y}-${m}-${d}`);
-        if (!lastDate || dObj > lastDate) lastDate = dObj;
-      }
-    }
-    totalScore = Math.max(0, Math.min(6, Math.round(totalScore)));
-    return { score: totalScore, lastDate };
-  }
-
-  const result = [];
-  for (const row of data) {
-    const type = row[2] || "";   // C
-    const freqRaw = row[3] || ""; // D
-    const label = row[4] || "";  // E
-
-    const freq = clean(freqRaw);
-    const isQuotidien = freq.includes("quotidien");
-    const isSpaced = freq.includes("repetition espacee") || freq.includes("répétition espacée");
-
-    // ⚠️ Exclure le "pratique délibérée" du mode journalier
-    if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) {
-      continue;
+    if (!apiUrl) {
+      alert("❌ Aucune URL WebApp trouvée pour l’utilisateur.");
+      throw new Error("apiUrl introuvable");
     }
 
-    const matchingDays = JOURS.filter(j => freq.includes(j));
+    initApp();
+  })
+  .catch(err => {
+    alert("❌ Erreur lors du chargement de la configuration.");
+    console.error("Erreur attrapée :", err);
+  });
 
-    const history = [];
-    for (let col = headers.length - 1; col >= 5; col--) {
-      const val = row[col];
-      const dateStr = headers[col];
-      if (!dateStr) continue;
+async function initApp() {
+  // Titre dynamique
+  document.getElementById("user-title").textContent =
+    `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
 
-      // Seulement les colonnes qui sont des dates (dd/MM/yyyy)
-      if (!/^\d{2}\/\d{2}\/\d{4}$/.test(String(dateStr))) continue;
+  // On enlève l’ancien affichage de date (non nécessaire avec le sélecteur)
+  const dateDisplay = document.getElementById("date-display");
+  if (dateDisplay) dateDisplay.remove();
 
-      if (val !== "" && val !== null && val !== undefined) {
-        const [d, m, y] = dateStr.split("/");
-        const entryDate = new Date(`${y}-${m}-${d}`);
-        const entryOnly = new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate());
-        if (entryOnly <= refDateOnly) {
-          history.push({ value: val, date: dateStr });
-        }
-      }
-    }
+  // Références éléments existants
+  const dateSelect = document.getElementById("date-select");
+  dateSelect.classList.add("mb-4");
 
-    let include = false;
-    let skipped = false;
-    let nextDate = null;
-    let reason = null;
-    let spacedInfo = null;
+  // ➡️ Remplir le select avec : Dates (7j) + (optionnel) Mode pratique — catégories
+  async function buildCombinedSelect() {
+    const sel = document.getElementById("date-select");
+    sel.innerHTML = "";
 
-    if (isQuotidien || matchingDays.includes(refDayName)) include = true;
+    // Placeholder
+    const ph = document.createElement("option");
+    ph.disabled = true; ph.hidden = true; ph.selected = true;
+    ph.textContent = "Choisis une date ou un mode pratique…";
+    sel.appendChild(ph);
 
-    if (isSpaced) {
-      const { score, lastDate } = computeScoreAndLastDate(row);
-      const delay = DELAYS[score];
-      let next = null;
-      if (lastDate) {
-        next = new Date(lastDate);
-        next.setDate(next.getDate() + delay);
-        if (isToday && referenceDate < next) {
-          skipped = true;
-          include = false;
-          nextDate = Utilities.formatDate(next, "GMT+1", "dd/MM/yyyy");
-          reason = `✅ Réponse positive enregistrée récemment. Prochaine apparition prévue le ${nextDate}.`;
-        }
-      }
-      spacedInfo = {
-        score,
-        lastDate: lastDate ? Utilities.formatDate(lastDate, "GMT+1", "dd/MM/yyyy") : null,
-        nextDate: next ? Utilities.formatDate(next, "GMT+1", "dd/MM/yyyy") : null
+    // Groupe Dates
+    const ogDates = document.createElement("optgroup");
+    ogDates.label = "Dates (7 derniers jours)";
+    const pastDates = [...Array(7)].map((_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      return {
+        value: d.toISOString().split("T")[0],
+        label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
       };
-    }
-
-    const base = { id: label, label, type, history, isSpaced, spacedInfo };
-    if (skipped) {
-      result.push({ ...base, skipped: true, nextDate, reason });
-    } else if (include) {
-      result.push({ ...base, skipped: false });
-    }
-  }
-
-  return ContentService
-    .createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-// ============================
-//  doPost — écriture
-// ============================
-function doPost(e) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Tracking');
-  const data = JSON.parse(e.postData.contents || "{}");
-
-  // ---------- MODE PRATIQUE ----------
-  if (clean(data._mode) === "practice") {
-    const category = (data._category || "").toString().trim();
-    if (!category) {
-      return ContentService.createTextOutput("❌ Catégorie manquante").setMimeType(ContentService.MimeType.TEXT);
-    }
-
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-
-    // Trouver le prochain n pour "Catégorie n"
-    let maxN = 0;
-    headers.forEach(h => {
-      const s = (h || "").toString();
-      const normS = clean(s.split("(")[0]);
-      const normCat = clean(category);
-
-      if (normS.startsWith(normCat)) {
-        const nStr = normS.replace(normCat, "").trim();
-        const n = parseInt(nStr, 10);
-        if (!isNaN(n)) maxN = Math.max(maxN, n);
-      }
     });
+    pastDates.forEach(opt => {
+      const o = document.createElement("option");
+      o.textContent = opt.label.charAt(0).toUpperCase() + opt.label.slice(1);
+      o.dataset.mode = "daily";
+      o.dataset.date = opt.value; // YYYY-MM-DD
+      ogDates.appendChild(o);
+    });
+    sel.appendChild(ogDates);
 
-    const nextN = maxN + 1;
-    const tz = Session.getScriptTimeZone() || "Europe/Paris";
-    const nowStr = Utilities.formatDate(new Date(), tz, "dd/MM/yyyy");
-    const newHeader = `${category} ${nextN} (${nowStr})`;
+    // Groupe Mode pratique (si dispo)
+    try {
+      const res = await fetch(`${apiUrl}?mode=practice`);
+      const cats = await res.json();
+      if (Array.isArray(cats) && cats.length) {
+        // Séparateur visuel
+        const sep = document.createElement("option");
+        sep.disabled = true; sep.textContent = "────────";
+        sel.appendChild(sep);
 
-    // Insérer la nouvelle colonne à l’index cible (F = 6)
-    const targetIndex = 6;
-    sheet.insertColumnBefore(targetIndex);
-    sheet.getRange(1, targetIndex).setValue(newHeader);
-
-    // Écrire les réponses (mapping par label en colonne E)
-    const labels = sheet.getRange(2, 5, sheet.getLastRow() - 1).getValues().flat(); // col E
-    for (let i = 0; i < labels.length; i++) {
-      const label = labels[i];
-      if (label && data[label] !== undefined && data[label] !== "") {
-        sheet.getRange(i + 2, targetIndex).setValue(data[label]);
+        const ogPractice = document.createElement("optgroup");
+        ogPractice.label = "Mode pratique — catégories";
+        cats.forEach(cat => {
+          const o = document.createElement("option");
+          o.textContent = `Mode pratique — ${cat}`;
+          o.dataset.mode = "practice";
+          o.dataset.category = cat;
+          ogPractice.appendChild(o);
+        });
+        sel.appendChild(ogPractice);
       }
+    } catch (e) {
+      console.warn("Impossible de charger les catégories de pratique", e);
     }
 
-    return ContentService.createTextOutput("✅ Itération enregistrée !").setMimeType(ContentService.MimeType.TEXT);
+    // Sélectionner automatiquement la première date
+    const firstDate = ogDates.querySelector("option");
+    if (firstDate) {
+      ph.selected = false;
+      firstDate.selected = true;
+    }
   }
+  
+  await buildCombinedSelect();
 
-  // ---------- MODE JOURNALIER (inchangé) ----------
-  const selectedDate = data._date;
-  if (!selectedDate) {
-    return ContentService.createTextOutput("❌ Date manquante").setMimeType(ContentService.MimeType.TEXT);
-  }
+  // État initial
+  handleSelectChange();
 
-  const parsedDate = new Date(selectedDate);
-  const dateStr = Utilities.formatDate(parsedDate, "GMT+1", "dd/MM/yyyy");
+  dateSelect.addEventListener("change", handleSelectChange);
 
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  let dateColIndex = headers.indexOf(dateStr) + 1;
-
-  if (dateColIndex === 0) {
-    dateColIndex = headers.length + 1;
-    sheet.getRange(1, dateColIndex).setValue(dateStr);
-  }
-
-  const targetIndex = 6; // F
-  if (dateColIndex !== targetIndex) {
-    sheet.insertColumnBefore(targetIndex);
-    const lastRow = sheet.getLastRow();
-    sheet.getRange(1, dateColIndex + 1, lastRow).moveTo(sheet.getRange(1, targetIndex, lastRow));
-    sheet.deleteColumn(dateColIndex + 1);
-  }
-
-  const questions = sheet.getRange(2, 5, sheet.getLastRow() - 1).getValues().flat();
-  for (let i = 0; i < questions.length; i++) {
-    const label = questions[i];
-    if (label && data[label] !== undefined && data[label] !== "") {
-      sheet.getRange(i + 2, targetIndex).setValue(data[label]);
+  function handleSelectChange() {
+    const sel = document.getElementById("date-select");
+    if (!sel || !sel.selectedOptions.length) return;
+    const selected = sel.selectedOptions[0];
+    const mode = selected.dataset.mode || "daily";
+    if (mode === "daily") {
+      loadFormForDate(selected.dataset.date);
+    } else {
+      loadPracticeForm(selected.dataset.category);
     }
   }
 
-  return ContentService.createTextOutput("✅ Données enregistrées !").setMimeType(ContentService.MimeType.TEXT);
-}
+  // 📨 Soumission
+  document.getElementById("submitBtn").addEventListener("click", (e) => {
+    e.preventDefault();
 
-// ============================
-//  (Optionnel) Rappels Telegram
-//  — on EXCLUT la “pratique délibérée”
-// ============================
-function sendTelegramMessage(chatId, message, botToken) {
-  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({ chat_id: chatId, text: message })
-  };
-  UrlFetchApp.fetch(url, options);
-}
+    const form = document.getElementById("daily-form");
+    const formData = new FormData(form);
+    const entries = Object.fromEntries(formData.entries());
 
-function sendAllTelegramReminders() {
-  const configSheet = SpreadsheetApp.openById(CONFIG_SHEET_ID).getSheets()[0];
-  const configData = configSheet.getDataRange().getValues();
-  const headers = configData[0].map(h => h.toString().toLowerCase());
-  const today = new Date();
-  const refDayName = today.toLocaleDateString("fr-FR", { weekday: "long" }).toLowerCase();
-  const formattedDate = Utilities.formatDate(today, "GMT+1", "dd/MM/yyyy");
+    const selected = dateSelect.selectedOptions[0];
+    const mode = selected?.dataset.mode || "daily";
 
-  configData.slice(1).forEach(row => {
-    const user = (row[0] || "").toString().toLowerCase();
-    const chatId = row[headers.indexOf("chatid")];
-    const botApi = row[headers.indexOf("api telegram")];
-    const sheetUrl = row[headers.indexOf("sheet url")];
-    const trackingUrl = row[headers.indexOf("url tracking")];
-    if (!user || !chatId || !botApi || !sheetUrl || !trackingUrl) return;
+    if (mode === "daily") {
+      entries._mode = "daily";
+      entries._date = selected.dataset.date; // YYYY-MM-DD
+    } else {
+      entries._mode = "practice";
+      entries._category = selected.dataset.category; // nom exact
+    }
+    entries.apiUrl = apiUrl;
+
+    fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
+      method: "POST",
+      body: JSON.stringify(entries),
+      headers: { "Content-Type": "application/json" }
+    })
+      .then(res => res.text())
+      .then(() => alert("✅ Réponses envoyées !"))
+      .catch(err => {
+        alert("❌ Erreur d’envoi");
+        console.error(err);
+      });
+  });
+
+  // =========================
+  //   Chargements / Renders
+  // =========================
+
+  function clearFormUI() {
+    document.getElementById("daily-form").innerHTML = "";
+    document.getElementById("submit-section").classList.add("hidden");
+  }
+
+  function showFormUI() {
+    document.getElementById("daily-form").classList.remove("hidden");
+    document.getElementById("submit-section").classList.remove("hidden");
+    const loader = document.getElementById("loader");
+    if (loader) loader.classList.add("hidden");
+  }
+
+  function loadFormForDate(dateISO) {
+    clearFormUI();
+    const loader = document.getElementById("loader");
+    if (loader) loader.classList.remove("hidden");
+
+    fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}`)
+      .then(res => res.json())
+      .then(renderQuestions)
+      .catch(err => {
+        document.getElementById("loader")?.classList.add("hidden");
+        console.error(err);
+        alert("❌ Erreur de chargement du formulaire journalier.");
+      });
+  }
+
+  async function loadPracticeForm(category) {
+    clearFormUI();
+    const loader = document.getElementById("loader");
+    if (loader) loader.classList.remove("hidden");
 
     try {
-      const ssId = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
-      const trackingSheet = SpreadsheetApp.openById(ssId).getSheetByName("Tracking");
-      const headersTracking = trackingSheet.getRange(1, 1, 1, trackingSheet.getLastColumn()).getValues()[0];
-      const data = trackingSheet.getRange(2, 1, trackingSheet.getLastRow() - 1, trackingSheet.getLastColumn()).getValues();
-
-      let count = 0;
-      data.forEach(r => {
-        const freq = clean(r[3]);
-        // ❌ Exclure la pratique délibérée des rappels quotidiens
-        if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) return;
-
-        const isSpaced = freq.includes("repetition espacee") || freq.includes("répétition espacée");
-        const isQuotidien = freq.includes("quotidien");
-        const isMatchingDay = JOURS.some(j => freq.includes(j) && j === refDayName);
-
-        let include = false;
-        if (isSpaced) {
-          let score = 0;
-          let lastDate = null;
-          for (let col = headersTracking.length - 1; col >= 5; col--) {
-            const val = clean(r[col]);
-            if (!val) continue;
-            score += ANSWER_VALUES[val] ?? 0;
-
-            const [d, m, y] = (headersTracking[col] || "").split("/");
-            if (d && m && y) {
-              const parsed = new Date(`${y}-${m}-${d}`);
-              if (!lastDate || parsed > lastDate) lastDate = parsed;
-            }
-          }
-          score = Math.max(0, Math.min(6, Math.round(score)));
-          const delay = DELAYS[score];
-          if (lastDate) {
-            const next = new Date(lastDate);
-            next.setDate(next.getDate() + delay);
-            include = today >= next;
-          } else include = true;
-        }
-
-        if (!isSpaced && (isQuotidien || isMatchingDay)) {
-          include = true;
-        }
-
-        if (include) count++;
-      });
-
-      const botToken = botApi.replace("https://api.telegram.org/bot", "").split("/")[0];
-      const message = count === 0
-        ? `🎉 Hello ${user}, rien à remplir aujourd’hui !\n👉 ${trackingUrl}`
-        : `📋 Hello ${user}, tu as ${count} chose(s) à traquer aujourd’hui (${formattedDate})\n👉 ${trackingUrl}`;
-
-      sendTelegramMessage(chatId, message, botToken);
+      const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`);
+      const questions = await res.json();
+      renderQuestions(questions);
     } catch (e) {
-      Logger.log(`Erreur pour ${user} : ${e}`);
+      document.getElementById("loader")?.classList.add("hidden");
+      console.error(e);
+      alert("❌ Erreur lors du chargement du formulaire de pratique.");
     }
-  });
+  }
+
+  // Renderer commun (journalier & pratique)
+  function renderQuestions(questions) {
+    const container = document.getElementById("daily-form");
+    container.innerHTML = "";
+
+    const normalize = (str) =>
+      (str || "")
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/[\u00A0\u202F\u200B]/g, " ")
+        .replace(/\s+/g, " ")
+        .toLowerCase()
+        .trim();
+
+    const colorMap = {
+      "oui": "bg-green-100 text-green-800",
+      "plutot oui": "bg-green-50 text-green-700",
+      "moyen": "bg-yellow-100 text-yellow-800",
+      "plutot non": "bg-red-100 text-red-700",
+      "non": "bg-red-200 text-red-900",
+      "pas de reponse": "bg-gray-200 text-gray-700 italic"
+    };
+
+    (questions || []).forEach(q => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
+
+      const label = document.createElement("label");
+      label.className = "block text-lg font-semibold mb-2";
+      label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
+      wrapper.appendChild(label);
+
+      // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
+      let referenceAnswer = "";
+      if (q.history && Array.isArray(q.history)) {
+        const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
+        if (dateISO) {
+           const entry = q.history.find(entry => {
+             if (entry?.date) {
+               const [dd, mm, yyyy] = entry.date.split("/");
+               const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+               return entryDateISO === dateISO;
+             }
+             return false;
+           });
+           referenceAnswer = entry?.value || "";
+        }
+      }
+
+      if (q.skipped) {
+        wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
+
+        const reason = document.createElement("p");
+        reason.className = "text-sm italic text-green-700 mb-2";
+        reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
+        wrapper.appendChild(reason);
+
+        const hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = q.id;
+        hidden.value = "";
+        wrapper.appendChild(hidden);
+      } else {
+        let input;
+        const type = (q.type || "").toLowerCase();
+
+        if (type.includes("oui")) {
+          input = document.createElement("div");
+          input.className = "space-x-6 text-gray-700";
+          input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
+            <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
+        } else if (type.includes("menu") || type.includes("likert")) {
+          input = document.createElement("select");
+          input.name = q.id;
+          input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+          ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
+            const option = document.createElement("option");
+            option.value = opt;
+            option.textContent = opt;
+            if (opt === referenceAnswer) option.selected = true;
+            input.appendChild(option);
+          });
+        } else if (type.includes("plus long")) {
+          input = document.createElement("textarea");
+          input.name = q.id;
+          input.rows = 4;
+          input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+          input.value = referenceAnswer;
+        } else {
+          input = document.createElement("input");
+          input.name = q.id;
+          input.type = "text";
+          input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+          input.value = referenceAnswer;
+        }
+
+        wrapper.appendChild(input);
+      }
+
+      // 📓 Historique (compatible daily et practice)
+      if (q.history && q.history.length > 0) {
+        const toggleBtn = document.createElement("button");
+        toggleBtn.type = "button";
+        toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
+        toggleBtn.textContent = "📓 Voir l’historique des réponses";
+
+        const historyBlock = document.createElement("div");
+        historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
+
+        q.history.forEach(entry => {
+          // entry.date (daily) OU entry.key (practice: "Catégorie N")
+          const key = entry.date || entry.key || "";
+          const val = entry.value;
+          const normalized = normalize(val);
+          const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
+
+          const entryDiv = document.createElement("div");
+          entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
+          entryDiv.innerHTML = `<strong>${key}</strong> – ${val}`;
+          historyBlock.appendChild(entryDiv);
+        });
+
+        toggleBtn.addEventListener("click", () => {
+          historyBlock.classList.toggle("hidden");
+        });
+
+        wrapper.appendChild(toggleBtn);
+        wrapper.appendChild(historyBlock);
+      }
+
+      container.appendChild(wrapper);
+    });
+
+    showFormUI();
+  }
 }
