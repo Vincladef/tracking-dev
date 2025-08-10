@@ -254,83 +254,6 @@ async function initApp() {
       label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
       wrapper.appendChild(label);
       
-      // — Résumé visuel (mini-graphe) —
-      // mapping de score (utilise la même normalisation que plus bas)
-      const SCORE_MAP = {
-        "oui": 1,
-        "plutot oui": 0.75,
-        "moyen": 0.25,
-        "plutot non": 0,
-        "non": -1,
-        "pas de reponse": 0
-      };
-      
-      const seriesRaw = (q.history || []).map(h => SCORE_MAP[normalize(h.value)]);
-      
-      // On garde les N derniers points pour le graphe (ex : 30) et on les inverse
-      // pour dessiner de gauche->droite = ancien->récent (plus lisible).
-      const MAX_POINTS = 30;
-      const series = seriesRaw.filter(v => typeof v === "number").slice(0, MAX_POINTS).reverse();
-      
-      if (series.length > 1) {
-        console.log(`📊 Dessin d'un graphe pour la question "${q.label}" avec ${series.length} points.`);
-        const dpr = window.devicePixelRatio || 1;
-        const cssW = 500, cssH = 60;
-        
-        const canvas = document.createElement("canvas");
-        canvas.width = cssW * dpr;
-        canvas.height = cssH * dpr;
-        canvas.style.width = cssW + "px";
-        canvas.style.height = cssH + "px";
-        canvas.className = "w-full block mt-1";
-        wrapper.appendChild(canvas);
-
-        const ctx = canvas.getContext("2d");
-        ctx.scale(dpr, dpr);
-        
-        const padX = 6, padY = 6;
-        const w = cssW - padX * 2;
-        const h = cssH - padY * 2;
-
-        const minY = -1, maxY = 1; // plage des scores
-        const xStep = series.length > 1 ? (w / (series.length - 1)) : w;
-
-        // fond discret
-        ctx.fillStyle = "#f9fafb";
-        ctx.fillRect(0, 0, cssW, cssH);
-
-        // ligne zéro
-        const y0 = padY + h * (1 - ((0 - minY) / (maxY - minY)));
-        ctx.strokeStyle = "#e5e7eb";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(padX, y0);
-        ctx.lineTo(padX + w, y0);
-        ctx.stroke();
-
-        // courbe
-        ctx.strokeStyle = "#2563eb"; // bleu Tailwind-ish
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        series.forEach((v, i) => {
-          const x = padX + i * xStep;
-          const y = padY + h * (1 - ((v - minY) / (maxY - minY)));
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-
-        // points
-        ctx.fillStyle = "#1f2937";
-        series.forEach((v, i) => {
-          const x = padX + i * xStep;
-          const y = padY + h * (1 - ((v - minY) / (maxY - minY)));
-          ctx.beginPath();
-          ctx.arc(x, y, 2, 0, Math.PI * 2);
-          ctx.fill();
-        });
-      }
-
-
       // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
       let referenceAnswer = "";
       if (q.history && Array.isArray(q.history)) {
@@ -409,9 +332,48 @@ async function initApp() {
         const historyBlock = document.createElement("div");
         historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
 
-        const LIMIT = 10;
+        // --- Graphe dans l’historique (sparkline) ---
+        (() => {
+          const SCORE_MAP = { "oui":1, "plutot oui":0.75, "moyen":0.25, "plutot non":0, "non":-1, "pas de reponse":0 };
+          const seriesRaw = (q.history || []).map(h => SCORE_MAP[normalize(h.value)]).filter(v => typeof v==="number");
+          const MAX_POINTS = 30;
+          const series = seriesRaw.slice(0, MAX_POINTS).reverse(); // ancien -> récent (gauche->droite)
 
-        q.history.forEach((entry, idx) => {
+          if (series.length > 1) {
+            console.log(`📊 Dessin d'un graphe pour la question "${q.label}" avec ${series.length} points.`);
+            const canvas = document.createElement("canvas");
+            // retina friendly
+            const dpr = window.devicePixelRatio || 1;
+            const cssW = 500, cssH = 60;
+            canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+            canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px";
+            canvas.className = "w-full block mb-3";
+            historyBlock.appendChild(canvas);
+
+            const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr);
+            const padX=6, padY=6, w=cssW-padX*2, h=cssH-padY*2;
+            const minY=-1, maxY=1;
+            const xStep = series.length>1 ? (w/(series.length-1)) : w;
+
+            // fond + ligne zéro
+            ctx.fillStyle = "#f9fafb"; ctx.fillRect(0,0,cssW,cssH);
+            const y0 = padY + h*(1-((0-minY)/(maxY-minY)));
+            ctx.strokeStyle="#e5e7eb"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(padX,y0); ctx.lineTo(padX+w,y0); ctx.stroke();
+
+            // courbe
+            ctx.strokeStyle="#2563eb"; ctx.lineWidth=2; ctx.beginPath();
+            series.forEach((v,i)=>{ const x=padX+i*xStep; const y=padY+h*(1-((v-minY)/(maxY-minY))); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+            ctx.stroke();
+
+            // points
+            ctx.fillStyle="#1f2937";
+            series.forEach((v,i)=>{ const x=padX+i*xStep; const y=padY+h*(1-((v-minY)/(maxY-minY))); ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2); ctx.fill(); });
+          }
+        })(); // Fin du bloc du graphe
+
+        // --- Liste avec limite + bouton "Afficher plus" (inchangé) ---
+        const LIMIT = 10;
+        (q.history || []).forEach((entry, idx) => {
           const key = entry.date || entry.key || "";
           const val = entry.value;
           const normalized = normalize(val);
@@ -419,32 +381,23 @@ async function initApp() {
 
           const entryDiv = document.createElement("div");
           entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
-          if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history"); // masqué par défaut
-
+          if (idx >= LIMIT) entryDiv.classList.add("hidden","extra-history");
           entryDiv.innerHTML = `<strong>${key}</strong> – ${val}`;
           historyBlock.appendChild(entryDiv);
         });
-
-        if (q.history.length > LIMIT) {
+        
+        if (q.history && q.history.length > LIMIT) {
           const moreBtn = document.createElement("button");
           moreBtn.type = "button";
           moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-          let expanded = false;
-          const rest = q.history.length - LIMIT;
-
-          const setLabel = () => {
-            moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
-          };
+          let expanded = false; const rest = q.history.length - LIMIT;
+          const setLabel = ()=> moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
           setLabel();
-
-          moreBtn.addEventListener("click", () => {
-            expanded = !expanded;
-            historyBlock.querySelectorAll(".extra-history").forEach(el => {
-              el.classList.toggle("hidden", !expanded);
-            });
+          moreBtn.addEventListener("click", ()=>{ 
+            expanded = !expanded; 
+            historyBlock.querySelectorAll(".extra-history").forEach(el=>el.classList.toggle("hidden",!expanded));
             setLabel();
           });
-
           historyBlock.appendChild(moreBtn);
         }
         
