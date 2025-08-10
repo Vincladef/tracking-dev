@@ -416,7 +416,6 @@ async function initApp() {
         historyBlock.appendChild(statsWrap);
 
         // ==== Fin stats ====
-        const LIMIT = 10;
         (q.history || []).forEach((entry, idx) => {
           const key = entry.date || entry.key || "";
           const val = entry.value;
