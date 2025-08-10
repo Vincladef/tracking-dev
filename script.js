@@ -1,582 +1,624 @@
-// 🧑 Identifier l’utilisateur depuis l’URL
-const urlParams = new URLSearchParams(location.search);
-const user = urlParams.get("user")?.toLowerCase();
+// ===================================
+//  CONFIG
+// ===================================
+// Remplacez 'YOUR_MACRO_ID' par l'ID de votre application web Google Apps Script
+const API_URL = 'https://script.google.com/macros/s/YOUR_MACRO_ID/exec';
+const URL_PRACTICE = `${API_URL}?mode=practice`;
+const URL_DAILY = `${API_URL}?mode=daily`;
 
-if (!user) {
-  alert("❌ Aucun utilisateur indiqué !");
-  throw new Error("Utilisateur manquant");
+// ===================================
+//  CONSTANTES & HELPERS
+// ===================================
+
+const ANSWER_VALUES = {
+  "oui": 1,
+  "plutot oui": 0.75,
+  "moyen": 0.25,
+  "plutot non": 0,
+  "non": -1,
+  "pas de reponse": 0
+};
+
+const ANSWER_LABELS = {
+  "oui": "Oui",
+  "plutot oui": "Plutôt oui",
+  "moyen": "Moyen",
+  "plutot non": "Plutôt non",
+  "non": "Non",
+  "pas de reponse": "Non répondu"
+};
+
+// Couleurs en format RGBA pour une compatibilité directe avec Chart.js
+const ANSWER_COLORS = {
+  "oui": "rgba(34,197,94,0.9)",       // green-500
+  "plutot oui": "rgba(132,204,22,0.9)", // lime-500
+  "moyen": "rgba(245,158,11,0.9)",    // amber-500
+  "plutot non": "rgba(249,115,22,0.9)",// orange-500
+  "non": "rgba(239,68,68,0.9)",       // red-500
+  "pas de reponse": "rgba(209,213,219,0.9)" // gray-300
+};
+
+// Couleurs pour le graphique de score quotidien (échelle 0-6)
+const DAILY_SCORE_COLORS = {
+  "0": 'rgb(239, 68, 68)',   // Rouge
+  "1": 'rgb(249, 115, 22)',   // Orange foncé
+  "2": 'rgb(245, 158, 11)',   // Orange
+  "3": 'rgb(234, 179, 8)',    // Jaune
+  "4": 'rgb(132, 204, 22)',   // Vert clair
+  "5": 'rgb(84, 182, 17)',    // Vert
+  "6": 'rgb(34, 197, 94)',    // Vert foncé
+};
+
+// Nettoie une chaîne de caractères pour une comparaison insensible à la casse et aux accents
+function clean(str) {
+  return (str || "")
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u00A0\u202F\u200B]/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .trim();
 }
 
-// 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
-const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
+// ===================================
+//  FONCTIONS DE RENDU (GRAPHIQUES)
+// ===================================
+const chartRegistry = {}; // Stocke les instances Chart.js pour les détruire avant de les recréer
 
-let apiUrl = null;
+// Affiche un graphique de type Likert pour l'historique d'une question
+function renderLikertChart(id, history) {
+  const chartEl = document.getElementById(id);
+  if (!chartEl) return;
 
-fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
-  .then(res => res.json())
-  .then(config => {
-    if (config.error) {
-      alert(`❌ Erreur: ${config.error}`);
-      throw new Error(config.error);
-    }
+  const ctx = chartEl.getContext('2d');
+  
+  const WINDOW = 30; // Nombre de points affichés pour éviter de surcharger le graphique
+  const windowed = history.slice(0, WINDOW);     // Sélectionne les entrées les plus récentes
+  const reversedHistory = [...windowed].reverse(); // Inverse pour un ordre chronologique (ancien → récent)
 
-    apiUrl = config.apiurl;
-    console.log("✅ API URL récupérée :", apiUrl);
+  const labels = [];
+  const data = [];
+  const colors = [];
 
-    if (!apiUrl) {
-      alert("❌ Aucune URL WebApp trouvée pour l’utilisateur.");
-      throw new Error("API URL introuvable");
-    }
+  for (const hist of reversedHistory) {
+    const raw = hist?.date || hist?.key || "";
+    // Extrait la date au format "dd/mm" à partir des en-têtes
+    const m = raw.match(/\((\d{2}\/\d{2}\/\d{4})\)/) || raw.match(/^(\d{2}\/\d{2}\/\d{4})$/);
+    const formattedDate = m ? m[1].slice(0,5) : ""; 
+    const value = clean(hist.value);
 
-    initApp();
-  })
-  .catch(err => {
-    alert("❌ Erreur lors du chargement de la configuration.");
-    console.error("Erreur attrapée :", err);
-  });
-
-async function initApp() {
-  // Titre dynamique
-  document.getElementById("user-title").textContent =
-    `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
-
-  // On enlève l’ancien affichage de date (non nécessaire avec le sélecteur)
-  const dateDisplay = document.getElementById("date-display");
-  if (dateDisplay) dateDisplay.remove();
-
-  // Références éléments existants
-  const dateSelect = document.getElementById("date-select");
-  dateSelect.classList.add("mb-4");
-
-  // ➡️ Remplir le select avec : Dates (7j) + (optionnel) Mode pratique — catégories
-  async function buildCombinedSelect() {
-    console.log("🛠️ Création du sélecteur de date et de mode...");
-    const sel = document.getElementById("date-select");
-    sel.innerHTML = "";
-
-    // Placeholder
-    const ph = document.createElement("option");
-    ph.disabled = true; ph.hidden = true; ph.selected = true;
-    ph.textContent = "Choisis une date ou un mode pratique…";
-    sel.appendChild(ph);
-
-    // Groupe Dates
-    const ogDates = document.createElement("optgroup");
-    ogDates.label = "Dates (7 derniers jours)";
-    const pastDates = [...Array(7)].map((_, i) => {
-      const d = new Date(); d.setDate(d.getDate() - i);
-      return {
-        value: d.toISOString().split("T")[0],
-        label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
-      };
-    });
-    pastDates.forEach(opt => {
-      const o = document.createElement("option");
-      o.textContent = opt.label.charAt(0).toUpperCase() + opt.label.slice(1);
-      o.dataset.mode = "daily";
-      o.dataset.date = opt.value; // YYYY-MM-DD
-      ogDates.appendChild(o);
-    });
-    sel.appendChild(ogDates);
-
-    // Groupe Mode pratique (si dispo)
-    try {
-      const res = await fetch(`${apiUrl}?mode=practice`);
-      const cats = await res.json();
-      if (Array.isArray(cats) && cats.length) {
-        // Séparateur visuel
-        const sep = document.createElement("option");
-        sep.disabled = true; sep.textContent = "────────";
-        sel.appendChild(sep);
-
-        const ogPractice = document.createElement("optgroup");
-        ogPractice.label = "Mode pratique — catégories";
-        cats.forEach(cat => {
-          const o = document.createElement("option");
-          o.textContent = `Mode pratique — ${cat}`;
-          o.dataset.mode = "practice";
-          o.dataset.category = cat;
-          ogPractice.appendChild(o);
-        });
-        sel.appendChild(ogPractice);
-      }
-    } catch (e) {
-      console.warn("Impossible de charger les catégories de pratique", e);
-    }
-
-    // Sélectionner automatiquement la première date
-    const firstDate = ogDates.querySelector("option");
-    if (firstDate) {
-      ph.selected = false;
-      firstDate.selected = true;
-    }
-    console.log("✅ Sélecteur de mode et de date prêt.");
+    labels.push(formattedDate);
+    data.push(ANSWER_VALUES[value]);
+    colors.push(ANSWER_COLORS[value] || 'rgba(209,213,219,0.9)');
   }
+  
+  // Ajuste la largeur du canvas pour éviter l'écrasement des barres
+  chartEl.width = Math.max(300, labels.length * 24);
 
-  await buildCombinedSelect();
+  const chartData = {
+    labels: labels,
+    datasets: [{
+      label: 'Réponses',
+      data: data,
+      backgroundColor: colors,
+      borderColor: colors,
+      borderWidth: 1
+    }]
+  };
 
-  // État initial
-  handleSelectChange();
-
-  dateSelect.addEventListener("change", handleSelectChange);
-
-  function handleSelectChange() {
-    const sel = document.getElementById("date-select");
-    if (!sel || !sel.selectedOptions.length) return;
-    const selected = sel.selectedOptions[0];
-    const mode = selected.dataset.mode || "daily";
-    if (mode === "daily") {
-      console.log(`➡️ Changement de mode : Journalier, date=${selected.dataset.date}`);
-      loadFormForDate(selected.dataset.date);
-    } else {
-      console.log(`➡️ Changement de mode : Pratique, catégorie=${selected.dataset.category}`);
-      loadPracticeForm(selected.dataset.category);
-    }
-  }
-
-  // 📨 Soumission
-  document.getElementById("submitBtn").addEventListener("click", (e) => {
-    e.preventDefault();
-
-    const form = document.getElementById("daily-form");
-    const formData = new FormData(form);
-    const entries = Object.fromEntries(formData.entries());
-
-    const selected = dateSelect.selectedOptions[0];
-    const mode = selected?.dataset.mode || "daily";
-
-    if (mode === "daily") {
-      entries._mode = "daily";
-      entries._date = selected.dataset.date; // YYYY-MM-DD
-    } else {
-      entries._mode = "practice";
-      entries._category = selected.dataset.category; // nom exact
-    }
-    entries.apiUrl = apiUrl;
-
-    console.log("📦 Envoi des données au Worker...", entries);
-
-    fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
-      method: "POST",
-      body: JSON.stringify(entries),
-      headers: { "Content-Type": "application/json" }
-    })
-      .then(res => res.text())
-      .then(() => {
-        alert("✅ Réponses envoyées !");
-        console.log("✅ Réponses envoyées avec succès.");
-      })
-      .catch(err => {
-        alert("❌ Erreur d’envoi");
-        console.error("❌ Erreur lors de l’envoi des données :", err);
-      });
-  });
-
-  // =========================
-  //   Chargements / Renders
-  // =========================
-
-  function clearFormUI() {
-    document.getElementById("daily-form").innerHTML = "";
-    document.getElementById("submit-section").classList.add("hidden");
-  }
-
-  function showFormUI() {
-    document.getElementById("daily-form").classList.remove("hidden");
-    document.getElementById("submit-section").classList.remove("hidden");
-    const loader = document.getElementById("loader");
-    if (loader) loader.classList.add("hidden");
-  }
-
-  function loadFormForDate(dateISO) {
-    clearFormUI();
-    const loader = document.getElementById("loader");
-    if (loader) loader.classList.remove("hidden");
-    console.log(`📡 Chargement des questions pour la date : ${dateISO}`);
-
-    fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}`)
-      .then(res => res.json())
-      .then(questions => {
-        console.log(`✅ ${questions.length} question(s) chargée(s).`);
-        renderQuestions(questions);
-      })
-      .catch(err => {
-        document.getElementById("loader")?.classList.add("hidden");
-        console.error(err);
-        alert("❌ Erreur de chargement du formulaire journalier.");
-      });
-  }
-
-  async function loadPracticeForm(category) {
-    clearFormUI();
-    const loader = document.getElementById("loader");
-    if (loader) loader.classList.remove("hidden");
-    console.log(`📡 Chargement des questions pour la catégorie : ${category}`);
-
-    try {
-      const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`);
-      const questions = await res.json();
-      console.log(`✅ ${questions.length} question(s) de pratique chargée(s).`);
-      renderQuestions(questions);
-    } catch (e) {
-      document.getElementById("loader")?.classList.add("hidden");
-      console.error(e);
-      alert("❌ Erreur lors du chargement du formulaire de pratique.");
-    }
-  }
-
-  // Mini chart Likert dans l'historique
-  function renderLikertChart(parentEl, history, normalize) {
-    // on prend max 30 points, ancien -> récent (gauche -> droite)
-    const MAX_POINTS = 30;
-    // on inverse les niveaux pour que "oui" soit en haut et "non" en bas
-    const levels = ["non", "plutot non", "moyen", "plutot oui", "oui"];
-    const labelByNorm = {
-      "non": "Non", "plutot non": "Plutôt non", "moyen": "Moyen",
-      "plutot oui": "Plutôt oui", "oui": "Oui"
-    };
-
-    const points = (history || [])
-      .slice(0, MAX_POINTS)         // récent->ancien fourni par backend → on coupe
-      .reverse()                  // puis on inverse pour ancien->récent
-      .map(e => {
-        const v = normalize(e.value);
-        const idx = levels.indexOf(v);
-        return (idx === -1) ? null : { v, idx };
-      })
-      .filter(Boolean);
-
-    if (points.length < 2) return; // rien à tracer
-
-    // Canvas retina friendly
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = 560, cssH = 140;
-    const pad = { l: 70, r: 8, t: 10, b: 24 };
-    const w = cssW - pad.l - pad.r;
-    const h = cssH - pad.t - pad.b;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = cssW * dpr; canvas.height = cssH * dpr;
-    canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px";
-    canvas.className = "w-full block mb-3 rounded";
-    parentEl.appendChild(canvas);
-
-    const ctx = canvas.getContext("2d");
-    ctx.scale(dpr, dpr);
-
-    // fond
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, cssW, cssH);
-
-    // grille horizontale + labels Likert
-    ctx.strokeStyle = "#e5e7eb"; // gris clair
-    ctx.lineWidth = 1;
-    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
-    ctx.fillStyle = "#374151"; // gris foncé pour labels
-
-    for (let i = 0; i < levels.length; i++) {
-      // on inverse le calcul pour que le label "oui" (i=4) soit en haut
-      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i);
-      ctx.beginPath();
-      ctx.moveTo(pad.l, y);
-      ctx.lineTo(pad.l + w, y);
-      ctx.stroke();
-
-      // label à gauche
-      const lab = labelByNorm[levels[i]] || levels[i];
-      ctx.fillText(lab, 8, y + 4);
-    }
-
-    // grille verticale (ticks x)
-    const n = points.length;
-    const step = n > 1 ? w / (n - 1) : w;
-    const xTickEvery = Math.max(1, Math.floor(n / 6)); // ~6 ticks max
-    ctx.strokeStyle = "#f3f4f6";
-    for (let i = 0; i < n; i += xTickEvery) {
-      const x = pad.l + i * step;
-      ctx.beginPath();
-      ctx.moveTo(x, pad.t);
-      ctx.lineTo(x, pad.t + h);
-      ctx.stroke();
-    }
-
-    // labels de dates sous l'axe X
-    ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
-    ctx.fillStyle = "#6b7280"; // gris pour les dates
-    for (let i = 0; i < n; i += xTickEvery) {
-      const x = pad.l + i * step;
-      const entryIdx = i; // correspond à l'index dans points
-      const histIdx = (history.length - points.length) + entryIdx;
-      const dateStr = history[histIdx]?.date || history[histIdx]?.key || "";
-      if (dateStr) {
-        // on formate la date ou l'itération
-        const formattedLabel = dateStr.includes('/') ? dateStr.substring(0, 5) : `N=${dateStr}`;
-        ctx.fillText(formattedLabel, x - 16, pad.t + h + 14); // petit offset
-      }
-    }
-
-    // courbe
-    ctx.strokeStyle = "#2563eb"; // bleu
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    points.forEach((p, i) => {
-      const x = pad.l + i * step;
-      // on inverse le calcul pour que "oui" (p.idx=4) soit en haut
-      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-
-    // points
-    ctx.fillStyle = "#1f2937";
-    points.forEach((p, i) => {
-      const x = pad.l + i * step;
-      // on inverse le calcul pour que "oui" (p.idx=4) soit en haut
-      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
-      ctx.beginPath();
-      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    // axe x (nominal, on laisse sans labels de dates pour rester compact)
-    ctx.strokeStyle = "#9ca3af";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(pad.l, pad.t + h);
-    ctx.lineTo(pad.l + w, pad.t + h);
-    ctx.stroke();
-  }
-
-  // Renderer commun (journalier & pratique)
-  function renderQuestions(questions) {
-    const container = document.getElementById("daily-form");
-    container.innerHTML = "";
-    console.log(`✍️ Rendu de ${questions.length} question(s)`);
-
-    const normalize = (str) =>
-      (str || "")
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .replace(/[\u00A0\u202F\u200B]/g, " ")
-      .replace(/\s+/g, " ")
-      .toLowerCase()
-      .trim();
-
-    const colorMap = {
-      "oui": "bg-green-100 text-green-800",
-      "plutot oui": "bg-green-50 text-green-700",
-      "moyen": "bg-yellow-100 text-yellow-800",
-      "plutot non": "bg-red-100 text-red-700",
-      "non": "bg-red-200 text-red-900",
-      "pas de reponse": "bg-gray-200 text-gray-700 italic"
-    };
-
-    const DELAYS = [0, 1, 2, 3, 5, 8, 13];
-
-    (questions || []).forEach(q => {
-      // Log détaillé pour chaque question
-      console.groupCollapsed(`[Question] Traitement de "${q.label}"`);
-
-      const selectedMode = document.getElementById("date-select")
-        .selectedOptions[0]?.dataset.mode || "daily";
-
-      console.log("-> Type de question :", q.type);
-      console.log("-> Est Répétition Espacée :", q.isSpaced);
-
-      if (q.isSpaced && q.spacedInfo) {
-        if (selectedMode === "practice") {
-          const s = q.spacedInfo.streak ?? 0;
-          const delay = q.spacedInfo.delayIter ?? 0;
-          console.log("-> Streak positif (itérations d'affilée):", s);
-          console.log(`-> Délai avant réapparition: ${delay} itération(s)`);
-        } else {
-          const delay = DELAYS[q.spacedInfo.score] ?? "?";
-          console.log("-> Score de Répétition :", q.spacedInfo.score);
-          console.log(`-> Prochain délai : ${delay} jour(s)`);
-          console.log("-> Dernière réponse :", q.spacedInfo.lastDate ?? "—");
-          console.log("-> Prochaine date due :", q.spacedInfo.nextDate ?? "—");
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      y: {
+        min: -1,
+        max: 1,
+        ticks: {
+          stepSize: 0.25,
+          // Affiche un libellé clair pour chaque niveau de la réponse Likert
+          callback: (v) => ({
+            1: 'Oui',
+            0.75: 'Plutôt oui',
+            0.25: 'Moyen',
+            0: 'Plutôt non',
+            [-1]: 'Non'
+          })[v] || ''
         }
       }
-
-      console.log("-> Est-elle affichée ? :", !q.skipped);
-      if (q.skipped) {
-        console.log("-> Raison du masquage :", q.reason);
-      }
-      console.groupEnd();
-
-      const wrapper = document.createElement("div");
-      wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
-
-      const label = document.createElement("label");
-      label.className = "block text-lg font-semibold mb-2";
-      label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
-      wrapper.appendChild(label);
-
-      // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
-      let referenceAnswer = "";
-      if (q.history && Array.isArray(q.history)) {
-        const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
-        if (dateISO) {
-          const entry = q.history.find(entry => {
-            if (entry?.date) {
-              const [dd, mm, yyyy] = entry.date.split("/");
-              const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-              return entryDateISO === dateISO;
-            }
-            return false;
-          });
-          referenceAnswer = entry?.value || "";
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: function(context) {
+            const value = context.raw;
+            const label = Object.keys(ANSWER_VALUES).find(key => ANSWER_VALUES[key] === value);
+            return ANSWER_LABELS[label] || "Non répondu";
+          }
         }
       }
+    }
+  };
 
-      if (q.skipped) {
-        wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
+  if (chartRegistry[id]) {
+    chartRegistry[id].destroy();
+  }
 
-        const reason = document.createElement("p");
-        reason.className = "text-sm italic text-green-700 mb-2";
-        reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
-        wrapper.appendChild(reason);
+  chartRegistry[id] = new Chart(ctx, {
+    type: 'bar',
+    data: chartData,
+    options: chartOptions
+  });
+}
 
-        const hidden = document.createElement("input");
-        hidden.type = "hidden";
-        hidden.name = q.id;
-        hidden.value = "";
-        wrapper.appendChild(hidden);
+// Affiche un graphique du score quotidien global
+function renderDailyScoreChart(data) {
+  const chartEl = document.getElementById('daily-score-chart');
+  if (!chartEl) return;
+
+  const ctx = chartEl.getContext('2d');
+  
+  const headers = {};
+  data.forEach(q => {
+    q.history.forEach(h => {
+      const { value, date } = h;
+      if (!headers[date]) headers[date] = [];
+      headers[date].push(value);
+    });
+  });
+
+  const sortedDates = Object.keys(headers).sort((a, b) => {
+    const [d1, m1, y1] = a.split('/').map(Number);
+    const [d2, m2, y2] = b.split('/').map(Number);
+    return new Date(y1, m1 - 1, d1) - new Date(y2, m2 - 1, d2);
+  });
+
+  const labels = sortedDates.map(d => d.slice(0,5)); // "dd/mm"
+
+  const scores = sortedDates.map(date => {
+    const vals = headers[date].map(v => ANSWER_VALUES[clean(v)]).filter(x => x !== undefined);
+    if (!vals.length) return 0;
+    const avg = vals.reduce((a,b)=>a+b,0) / vals.length;   // Calcule la moyenne des réponses (-1..1)
+    const score0to6 = Math.round((avg + 1) * 3);           // Mappe la moyenne sur une échelle de 0..6
+    return score0to6;
+  });
+  
+  const chartData = {
+    labels: labels,
+    datasets: [{
+      label: 'Score Quotidien',
+      data: scores,
+      backgroundColor: scores.map(s => DAILY_SCORE_COLORS[s.toString()]),
+      borderColor: scores.map(s => DAILY_SCORE_COLORS[s.toString()]),
+      borderWidth: 1
+    }]
+  };
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      y: {
+        min: 0,
+        max: 6,
+        ticks: { stepSize: 1 }
+      },
+      x: { grid: { display: false } }
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: function(context) {
+            const score = context.raw;
+            return `Score: ${score}`;
+          }
+        }
+      }
+    }
+  };
+
+  if (chartRegistry['daily-score-chart']) {
+    chartRegistry['daily-score-chart'].destroy();
+  }
+
+  chartRegistry['daily-score-chart'] = new Chart(ctx, {
+    type: 'bar',
+    data: chartData,
+    options: chartOptions
+  });
+}
+
+
+// ===================================
+//  GESTION DES PAGES ET DONNÉES
+// ===================================
+const pageDaily = document.getElementById('page-daily');
+const pagePractice = document.getElementById('page-practice');
+
+let dailyData = [];
+
+// Charge les données pour le mode journalier à une date donnée
+async function loadDailyData(dateStr) {
+  const loadingEl = document.getElementById('daily-loading');
+  const questionsListEl = document.getElementById('daily-questions-list');
+  questionsListEl.innerHTML = '';
+  loadingEl.classList.remove('hidden');
+
+  try {
+    const url = `${URL_DAILY}&date=${dateStr}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    dailyData = data;
+    renderDailyPage(data);
+    renderDailyScoreChart(data);
+  } catch (err) {
+    console.error("Erreur lors du chargement des données journalières", err);
+    alert("Erreur de chargement des données.");
+  } finally {
+    loadingEl.classList.add('hidden');
+  }
+}
+
+// Affiche la page journalière avec les questions et graphiques
+function renderDailyPage(data) {
+  const questionsListEl = document.getElementById('daily-questions-list');
+  questionsListEl.innerHTML = '';
+
+  data.forEach(q => {
+    const card = document.createElement('div');
+    card.className = 'bg-white p-4 rounded-lg shadow-md mb-4';
+    card.innerHTML = `
+      <h3 class="font-bold text-lg mb-2">${q.label}</h3>
+      <p class="text-sm text-gray-500 mb-2">${q.type}</p>
+      ${q.reason ? `<div class="bg-blue-100 text-blue-800 p-2 rounded-md">${q.reason}</div>` : ''}
+      <div class="mt-4">
+        ${!q.skipped ? `
+          <div class="flex flex-wrap gap-2 mb-4">
+            ${Object.keys(ANSWER_LABELS).map(val => {
+              if (val === "pas de reponse") return '';
+              return `<button class="answer-btn bg-gray-200 text-gray-800 px-4 py-2 rounded-full hover:bg-gray-300" data-question-id="${q.id}" data-value="${val}">${ANSWER_LABELS[val]}</button>`;
+            }).join('')}
+          </div>
+        ` : ''}
+        ${q.history && q.history.length > 0 ? `
+          <div class="w-full h-24 overflow-x-auto">
+            <canvas id="chart-daily-${q.id}"></canvas>
+          </div>
+        ` : ''}
+      </div>
+    `;
+    questionsListEl.appendChild(card);
+    if (q.history && q.history.length > 0) {
+      renderLikertChart(`chart-daily-${q.id}`, q.history);
+    }
+  });
+
+  document.querySelectorAll('#page-daily .answer-btn').forEach(btn => {
+    btn.addEventListener('click', handleDailyAnswer);
+  });
+}
+
+// Gère la sélection des réponses pour le mode journalier
+function handleDailyAnswer(e) {
+  const btn = e.target;
+  const questionId = btn.dataset.questionId;
+  const answerValue = btn.dataset.value;
+  const q = dailyData.find(d => d.id === questionId);
+
+  if (!q) return;
+
+  const currentAnswer = clean(q.history?.[0]?.value);
+  if (currentAnswer === answerValue) {
+      q.history[0].value = ''; // Désélectionne si l'utilisateur clique sur la même réponse
+  } else if (q.history?.[0]?.date) {
+      q.history[0].value = answerValue; // Met à jour l'historique
+  } else {
+      q.history.unshift({ value: answerValue, date: document.getElementById('daily-date').value });
+  }
+
+  // Met à jour l'état visuel des boutons de réponse
+  const card = btn.closest('.bg-white');
+  card.querySelectorAll('.answer-btn').forEach(b => {
+      if (clean(q.history?.[0]?.value) === b.dataset.value) {
+          b.classList.add('bg-blue-500', 'text-white', 'hover:bg-blue-600');
+          b.classList.remove('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300');
       } else {
-        let input;
-        const type = (q.type || "").toLowerCase();
-
-        if (type.includes("oui")) {
-          input = document.createElement("div");
-          input.className = "space-x-6 text-gray-700";
-          input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-           <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
-        } else if (type.includes("menu") || type.includes("likert")) {
-          input = document.createElement("select");
-          input.name = q.id;
-          input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-          ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
-            const option = document.createElement("option");
-            option.value = opt;
-            option.textContent = opt;
-            if (opt === referenceAnswer) option.selected = true;
-            input.appendChild(option);
-          });
-        } else if (type.includes("plus long")) {
-          input = document.createElement("textarea");
-          input.name = q.id;
-          input.rows = 4;
-          input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-          input.value = referenceAnswer;
-        } else {
-          input = document.createElement("input");
-          input.name = q.id;
-          input.type = "text";
-          input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-          input.value = referenceAnswer;
-        }
-
-        wrapper.appendChild(input);
+          b.classList.remove('bg-blue-500', 'text-white', 'hover:bg-blue-600');
+          b.classList.add('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300');
       }
+  });
 
-      // 📓 Historique (compatible daily et practice)
-      if (q.history && q.history.length > 0) {
-        console.log(`📖 Affichage de l'historique pour "${q.label}" (${q.history.length} entrées)`);
-        const toggleBtn = document.createElement("button");
-        toggleBtn.type = "button";
-        toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
-        toggleBtn.textContent = "📓 Voir l’historique des réponses";
+  // Met à jour le graphique de l'historique de la question
+  const chartId = `chart-daily-${questionId}`;
+  if (chartRegistry[chartId]) {
+    chartRegistry[chartId].destroy();
+  }
+  renderLikertChart(chartId, q.history);
 
-        const historyBlock = document.createElement("div");
-        historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
+  // Met à jour le graphique du score quotidien global
+  renderDailyScoreChart(dailyData);
+}
 
-        // Graphe Likert + 2 stats compactes (sur 30 dernières)
-        renderLikertChart(historyBlock, q.history, normalize);
+// Envoie les réponses journalières au script Apps Script
+async function submitDailyData() {
+  const loadingEl = document.getElementById('daily-loading');
+  loadingEl.classList.remove('hidden');
+  const submitBtn = document.getElementById('daily-submit-btn');
+  submitBtn.disabled = true;
 
-        const LIMIT = 10;
-        const WINDOW = 30;
-        const badge = (title, value, tone="blue") => {
-          const div = document.createElement("div");
-          const tones = {
-            blue:"bg-blue-50 text-blue-700 border-blue-200",
-            green:"bg-green-50 text-green-700 border-green-200",
-            yellow:"bg-yellow-50 text-yellow-700 border-yellow-200",
-            red:"bg-red-50 text-red-700 border-red-200",
-            gray:"bg-gray-50 text-gray-700 border-gray-200",
-            purple:"bg-purple-50 text-purple-700 border-purple-200"
-          };
-          div.className = `px-2.5 py-1 rounded-full border text-xs font-medium ${tones[tone]||tones.gray}`;
-          div.innerHTML = `<span class="opacity-70">${title}:</span> <span class="font-semibold">${value}</span>`;
-          return div;
-        };
-        const POSITIVE = new Set(["oui","plutot oui"]);
-        const windowHist = (q.history || []).slice(0, WINDOW);
-
-        let currentStreak = 0;
-        for (const e of windowHist) {
-          if (POSITIVE.has(normalize(e.value))) currentStreak++;
-          else break;
-        }
-
-        const counts = {};
-        const order = ["non","plutot non","moyen","plutot oui","oui"];
-        for (const e of windowHist) {
-          const v = normalize(e.value);
-          counts[v] = (counts[v] || 0) + 1;
-        }
-        let best = null, bestCount = -1;
-        for (const k of order) {
-          const c = counts[k] || 0;
-          if (c > bestCount) { best = k; bestCount = c; }
-        }
-        const pretty = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
-        const statsWrap = document.createElement("div");
-        statsWrap.className = "mb-3 flex flex-wrap gap-2 items-center";
-        statsWrap.appendChild(badge("Série actuelle (positifs)", currentStreak, currentStreak>0 ? "green":"gray"));
-        if (best) statsWrap.appendChild(badge("Réponse la plus fréquente", pretty[best] || best, "purple"));
-        historyBlock.appendChild(statsWrap);
-
-        // Liste (10 visibles) + bouton Afficher plus / Réduire
-        (q.history || []).forEach((entry, idx) => {
-          const key = entry.date || entry.key || "";
-          const val = entry.value;
-          const normalized = normalize(val);
-          const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
-
-          const entryDiv = document.createElement("div");
-          entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
-          if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history");
-          entryDiv.innerHTML = `<strong>${key}</strong> – ${val}`;
-          historyBlock.appendChild(entryDiv);
-        });
-
-        if (q.history && q.history.length > LIMIT) {
-          const moreBtn = document.createElement("button");
-          moreBtn.type = "button";
-          moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-          let expanded = false; const rest = q.history.length - LIMIT;
-          const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
-          setLabel();
-          moreBtn.addEventListener("click", () => {
-            expanded = !expanded;
-            historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
-            setLabel();
-          });
-          historyBlock.appendChild(moreBtn);
-        }
-
-        toggleBtn.addEventListener("click", () => {
-          historyBlock.classList.toggle("hidden");
-        });
-
-        wrapper.appendChild(toggleBtn);
-        wrapper.appendChild(historyBlock);
+  try {
+    const dataToSend = {
+      _mode: 'daily',
+      _date: document.getElementById('daily-date').value
+    };
+    dailyData.forEach(q => {
+      const answer = q.history?.[0]?.value;
+      if (answer) {
+        dataToSend[q.id] = answer;
       }
-
-      container.appendChild(wrapper);
     });
 
-    showFormUI();
-    console.log("✅ Rendu des questions terminé.");
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dataToSend)
+    });
+
+    const text = await response.text();
+    alert(text);
+    if (response.ok) {
+      await loadDailyData(document.getElementById('daily-date').value);
+    }
+  } catch (err) {
+    console.error("Erreur lors de l'envoi des données", err);
+    alert("Erreur de soumission des données.");
+  } finally {
+    loadingEl.classList.add('hidden');
+    submitBtn.disabled = false;
   }
 }
+
+// Charge la liste des catégories pour le mode "Pratique Délibérée"
+async function loadPracticeCategories() {
+  const loadingEl = document.getElementById('practice-loading');
+  const categoriesListEl = document.getElementById('practice-categories');
+  loadingEl.classList.remove('hidden');
+
+  try {
+    const response = await fetch(URL_PRACTICE);
+    const categories = await response.json();
+    categoriesListEl.innerHTML = '';
+    categories.forEach(cat => {
+      const btn = document.createElement('button');
+      btn.className = 'category-btn bg-gray-200 text-gray-800 px-4 py-2 rounded-full hover:bg-gray-300';
+      btn.textContent = cat;
+      btn.dataset.category = cat;
+      categoriesListEl.appendChild(btn);
+    });
+
+    document.querySelectorAll('.category-btn').forEach(btn => {
+      btn.addEventListener('click', () => loadPracticeQuestions(btn.dataset.category));
+    });
+
+    pagePractice.dataset.state = 'categories';
+  } catch (err) {
+    console.error("Erreur lors du chargement des catégories", err);
+    alert("Erreur de chargement des catégories.");
+  } finally {
+    loadingEl.classList.add('hidden');
+  }
+}
+
+let practiceData = [];
+let currentCategory = null;
+
+// Charge les questions pour une catégorie de pratique donnée
+async function loadPracticeQuestions(category) {
+  currentCategory = category;
+  const loadingEl = document.getElementById('practice-loading');
+  const questionsListEl = document.getElementById('practice-questions-list');
+  questionsListEl.innerHTML = '';
+  loadingEl.classList.remove('hidden');
+  document.getElementById('practice-category-title').textContent = `Pratique délibérée : ${category}`;
+
+  try {
+    const url = `${URL_PRACTICE}&category=${encodeURIComponent(category)}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    practiceData = data;
+    renderPracticePage(data);
+  } catch (err) {
+    console.error("Erreur lors du chargement des questions de pratique", err);
+    alert("Erreur de chargement des questions de pratique.");
+  } finally {
+    loadingEl.classList.add('hidden');
+  }
+}
+
+// Affiche la page de pratique avec les questions
+function renderPracticePage(data) {
+  const questionsListEl = document.getElementById('practice-questions-list');
+  questionsListEl.innerHTML = '';
+  const submitBtn = document.getElementById('practice-submit-btn');
+  submitBtn.disabled = false;
+  
+  const questionsToAnswer = data.filter(q => !q.skipped);
+
+  if (questionsToAnswer.length === 0) {
+      questionsListEl.innerHTML = `<p class="text-gray-500">🎉 Aucune question à répondre aujourd'hui dans cette catégorie !</p>`;
+      submitBtn.disabled = true;
+  } else {
+    questionsToAnswer.forEach(q => {
+      const card = document.createElement('div');
+      card.className = 'bg-white p-4 rounded-lg shadow-md mb-4';
+      card.innerHTML = `
+        <h3 class="font-bold text-lg mb-2">${q.label}</h3>
+        <p class="text-sm text-gray-500 mb-2">${q.type}</p>
+        <div class="mt-4">
+          <div class="flex flex-wrap gap-2 mb-4">
+            ${Object.keys(ANSWER_LABELS).map(val => {
+              if (val === "pas de reponse") return '';
+              return `<button class="answer-btn bg-gray-200 text-gray-800 px-4 py-2 rounded-full hover:bg-gray-300" data-question-id="${q.id}" data-value="${val}">${ANSWER_LABELS[val]}</button>`;
+            }).join('')}
+          </div>
+          ${q.history && q.history.length > 0 ? `
+            <div class="w-full h-24 overflow-x-auto">
+              <canvas id="chart-practice-${q.id}"></canvas>
+            </div>
+          ` : ''}
+        </div>
+      `;
+      questionsListEl.appendChild(card);
+      if (q.history && q.history.length > 0) {
+        renderLikertChart(`chart-practice-${q.id}`, q.history);
+      }
+    });
+  }
+
+  // Affiche les questions masquées par la Répétition Espacée
+  const skippedQuestions = data.filter(q => q.skipped);
+  if (skippedQuestions.length > 0) {
+    const skippedTitle = document.createElement('h3');
+    skippedTitle.className = 'font-bold text-lg mt-8 mb-4';
+    skippedTitle.textContent = 'Questions masquées (SR)';
+    questionsListEl.appendChild(skippedTitle);
+
+    skippedQuestions.forEach(q => {
+      const card = document.createElement('div');
+      card.className = 'bg-white p-4 rounded-lg shadow-md mb-4 opacity-50';
+      card.innerHTML = `
+        <h3 class="font-bold text-lg mb-2">${q.label}</h3>
+        <p class="text-sm text-gray-500 mb-2">${q.type}</p>
+        ${q.reason ? `<div class="bg-blue-100 text-blue-800 p-2 rounded-md mt-4">${q.reason}</div>` : ''}
+        ${q.history && q.history.length > 0 ? `
+          <div class="w-full h-24 overflow-x-auto">
+            <canvas id="chart-practice-${q.id}"></canvas>
+          </div>
+        ` : ''}
+      `;
+      questionsListEl.appendChild(card);
+      if (q.history && q.history.length > 0) {
+        renderLikertChart(`chart-practice-${q.id}`, q.history);
+      }
+    });
+  }
+  
+  document.querySelectorAll('#page-practice .answer-btn').forEach(btn => {
+    btn.addEventListener('click', handlePracticeAnswer);
+  });
+  
+  pagePractice.dataset.state = 'questions';
+}
+
+// Gère la sélection des réponses pour le mode "Pratique Délibérée"
+function handlePracticeAnswer(e) {
+  const btn = e.target;
+  const questionId = btn.dataset.questionId;
+  const answerValue = btn.dataset.value;
+  const q = practiceData.find(d => d.id === questionId);
+
+  if (!q) return;
+
+  const currentAnswer = btn.closest('.flex').querySelector('.bg-blue-500')?.dataset.value || null;
+
+  // Désélectionne si l'utilisateur clique sur la même réponse
+  if (currentAnswer === answerValue) {
+    q.history.unshift({ value: '', date: null, key: null });
+  } else {
+    q.history.unshift({ value: answerValue, date: null, key: null });
+  }
+
+  // Met à jour l'état visuel des boutons
+  const allButtons = btn.closest('.flex').querySelectorAll('.answer-btn');
+  allButtons.forEach(b => {
+    b.classList.remove('bg-blue-500', 'text-white', 'hover:bg-blue-600');
+    b.classList.add('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300');
+  });
+
+  const newAnswer = clean(q.history[0]?.value);
+  if (newAnswer) {
+    const newActiveBtn = btn.closest('.flex').querySelector(`[data-value="${newAnswer}"]`);
+    if (newActiveBtn) {
+      newActiveBtn.classList.add('bg-blue-500', 'text-white', 'hover:bg-blue-600');
+      newActiveBtn.classList.remove('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300');
+    }
+  }
+
+  // Met à jour le graphique de l'historique
+  const chartId = `chart-practice-${questionId}`;
+  if (chartRegistry[chartId]) {
+    chartRegistry[chartId].destroy();
+  }
+  renderLikertChart(chartId, q.history);
+}
+
+// Envoie les réponses de pratique au script Apps Script
+async function submitPracticeData() {
+  const loadingEl = document.getElementById('practice-loading');
+  loadingEl.classList.remove('hidden');
+  const submitBtn = document.getElementById('practice-submit-btn');
+  submitBtn.disabled = true;
+
+  try {
+    const dataToSend = {
+      _mode: 'practice',
+      _category: currentCategory,
+    };
+    practiceData.forEach(q => {
+      if (!q.skipped) {
+        dataToSend[q.id] = q.history?.[0]?.value || '';
+      }
+    });
+
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dataToSend)
+    });
+
+    const text = await response.text();
+    alert(text);
+    if (response.ok) {
+      await loadPracticeQuestions(currentCategory);
+    }
+  } catch (err) {
+    console.error("Erreur lors de l'envoi des données de pratique", err);
+    alert("Erreur de soumission des données.");
+  } finally {
+    loadingEl.classList.add('hidden');
+    submitBtn.disabled = false;
+  }
+}
+
+// ===================================
+//  NAVIGATION ET INITIALISATION
+// ===================================
+
+document.getElementById('nav-daily-btn').addEventListener('click', () => {
+  pageDaily.classList.remove('hidden');
+  pagePractice.classList.add('hidden');
+  loadDailyData(document.getElementById('daily-date').value);
+});
+
+document.getElementById('nav-practice-btn').addEventListener('click', () => {
+  pagePractice.classList.remove('hidden');
+  pageDaily.classList.add('hidden');
+  loadPracticeCategories();
+});
+
+document.getElementById('daily-date').addEventListener('change', (e) => {
+  loadDailyData(e.target.value);
+});
+
+document.getElementById('daily-submit-btn').addEventListener('click', submitDailyData);
+document.getElementById('practice-submit-btn').addEventListener('click', submitPracticeData);
+
+// Lance le chargement initial de la page "Journalier"
+document.addEventListener('DOMContentLoaded', () => {
+  const today = new Date();
+  const dateStr = today.toISOString().split('T')[0];
+  document.getElementById('daily-date').value = dateStr;
+  loadDailyData(dateStr);
+});
