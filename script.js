@@ -1,4 +1,12 @@
 // ===================================
+//  CONFIG
+// ===================================
+// Remplacez 'YOUR_MACRO_ID' par l'ID de votre application web Google Apps Script
+const API_URL = 'https://script.google.com/macros/s/YOUR_MACRO_ID/exec';
+const URL_PRACTICE = `${API_URL}?mode=practice`;
+const URL_DAILY = `${API_URL}?mode=daily`;
+
+// ===================================
 //  CONSTANTES & HELPERS
 // ===================================
 
@@ -54,47 +62,6 @@ function clean(str) {
 }
 
 // ===================================
-//  CHARGEMENT DE LA CONFIGURATION
-// ===================================
-// 🧑 Identifier l’utilisateur depuis l’URL
-const urlParams = new URLSearchParams(location.search);
-const user = urlParams.get("user")?.toLowerCase();
-
-if (!user) {
-  alert("❌ Aucun utilisateur indiqué !");
-  throw new Error("Utilisateur manquant");
-}
-
-// 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
-const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
-
-let apiUrl = null;
-
-fetch(`${CONFIG_URL}?user=${user}`)
-  .then(res => res.json())
-  .then(config => {
-    if (config.error) {
-      alert(`❌ Erreur: ${config.error}`);
-      throw new Error(config.error);
-    }
-    
-    apiUrl = config.apiurl;
-    console.log("✅ apiUrl récupérée :", apiUrl);
-
-    if (!apiUrl) {
-      alert("❌ Aucune URL WebApp trouvée pour l’utilisateur.");
-      throw new Error("apiUrl introuvable");
-    }
-
-    initApp(apiUrl);
-  })
-  .catch(err => {
-    alert("❌ Erreur lors du chargement de la configuration.");
-    console.error("Erreur attrapée :", err);
-  });
-
-
-// ===================================
 //  FONCTIONS DE RENDU (GRAPHIQUES)
 // ===================================
 const chartRegistry = {}; // Stocke les instances Chart.js pour les détruire avant de les recréer
@@ -126,10 +93,8 @@ function renderLikertChart(id, history) {
     colors.push(ANSWER_COLORS[value] || 'rgba(209,213,219,0.9)');
   }
   
-  // Ajuste la largeur du canvas pour éviter l'écrasement des barres et permettre le défilement
-  const px = Math.max(300, labels.length * 24);
-  chartEl.style.width = px + 'px';
-  chartEl.style.minWidth = px + 'px';
+  // Ajuste la largeur du canvas pour éviter l'écrasement des barres
+  chartEl.width = Math.max(300, labels.length * 24);
 
   const chartData = {
     labels: labels,
@@ -166,10 +131,10 @@ function renderLikertChart(id, history) {
       legend: { display: false },
       tooltip: {
         callbacks: {
-          label: (ctx) => {
-            const v = Number(ctx.raw);
-            const map = { 1:'Oui', 0.75:'Plutôt oui', 0.25:'Moyen', 0:'Plutôt non', [-1]:'Non' };
-            return map[v] ?? 'Non répondu';
+          label: function(context) {
+            const value = context.raw;
+            const label = Object.keys(ANSWER_VALUES).find(key => ANSWER_VALUES[key] === value);
+            return ANSWER_LABELS[label] || "Non répondu";
           }
         }
       }
@@ -196,7 +161,6 @@ function renderDailyScoreChart(data) {
   
   const headers = {};
   data.forEach(q => {
-    q.history = q.history || [];
     q.history.forEach(h => {
       const { value, date } = h;
       if (!headers[date]) headers[date] = [];
@@ -270,11 +234,10 @@ function renderDailyScoreChart(data) {
 // ===================================
 //  GESTION DES PAGES ET DONNÉES
 // ===================================
-
-let dailyData = [];
 const pageDaily = document.getElementById('page-daily');
 const pagePractice = document.getElementById('page-practice');
 
+let dailyData = [];
 
 // Charge les données pour le mode journalier à une date donnée
 async function loadDailyData(dateStr) {
@@ -284,7 +247,7 @@ async function loadDailyData(dateStr) {
   loadingEl.classList.remove('hidden');
 
   try {
-    const url = `${apiUrl}?mode=daily&date=${dateStr}`;
+    const url = `${URL_DAILY}&date=${dateStr}`;
     const response = await fetch(url);
     const data = await response.json();
     dailyData = data;
@@ -345,7 +308,6 @@ function handleDailyAnswer(e) {
   const q = dailyData.find(d => d.id === questionId);
 
   if (!q) return;
-  q.history = q.history || [];
 
   const currentAnswer = clean(q.history?.[0]?.value);
   if (currentAnswer === answerValue) {
@@ -398,7 +360,7 @@ async function submitDailyData() {
       }
     });
 
-    const response = await fetch(apiUrl, {
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(dataToSend)
@@ -425,8 +387,7 @@ async function loadPracticeCategories() {
   loadingEl.classList.remove('hidden');
 
   try {
-    const url = `${apiUrl}?mode=practice`;
-    const response = await fetch(url);
+    const response = await fetch(URL_PRACTICE);
     const categories = await response.json();
     categoriesListEl.innerHTML = '';
     categories.forEach(cat => {
@@ -463,7 +424,7 @@ async function loadPracticeQuestions(category) {
   document.getElementById('practice-category-title').textContent = `Pratique délibérée : ${category}`;
 
   try {
-    const url = `${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`;
+    const url = `${URL_PRACTICE}&category=${encodeURIComponent(category)}`;
     const response = await fetch(url);
     const data = await response.json();
     practiceData = data;
@@ -559,7 +520,6 @@ function handlePracticeAnswer(e) {
   const q = practiceData.find(d => d.id === questionId);
 
   if (!q) return;
-  q.history = q.history || [];
 
   const currentAnswer = btn.closest('.flex').querySelector('.bg-blue-500')?.dataset.value || null;
 
@@ -612,7 +572,7 @@ async function submitPracticeData() {
       }
     });
 
-    const response = await fetch(apiUrl, {
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(dataToSend)
@@ -636,34 +596,29 @@ async function submitPracticeData() {
 //  NAVIGATION ET INITIALISATION
 // ===================================
 
-function initApp(api) {
-  // L'URL de l'API est maintenant disponible via la variable `api`
-  apiUrl = api;
+document.getElementById('nav-daily-btn').addEventListener('click', () => {
+  pageDaily.classList.remove('hidden');
+  pagePractice.classList.add('hidden');
+  loadDailyData(document.getElementById('daily-date').value);
+});
 
-  // L'initialisation de l'application peut commencer
-  document.getElementById('nav-daily-btn').addEventListener('click', () => {
-    pageDaily.classList.remove('hidden');
-    pagePractice.classList.add('hidden');
-    loadDailyData(document.getElementById('daily-date').value);
-  });
+document.getElementById('nav-practice-btn').addEventListener('click', () => {
+  pagePractice.classList.remove('hidden');
+  pageDaily.classList.add('hidden');
+  loadPracticeCategories();
+});
 
-  document.getElementById('nav-practice-btn').addEventListener('click', () => {
-    pagePractice.classList.remove('hidden');
-    pageDaily.classList.add('hidden');
-    loadPracticeCategories();
-  });
+document.getElementById('daily-date').addEventListener('change', (e) => {
+  loadDailyData(e.target.value);
+});
 
-  document.getElementById('daily-date').addEventListener('change', (e) => {
-    loadDailyData(e.target.value);
-  });
+document.getElementById('daily-submit-btn').addEventListener('click', submitDailyData);
+document.getElementById('practice-submit-btn').addEventListener('click', submitPracticeData);
 
-  document.getElementById('daily-submit-btn').addEventListener('click', submitDailyData);
-  document.getElementById('practice-submit-btn').addEventListener('click', submitPracticeData);
-
-  // Lance le chargement initial de la page "Journalier"
+// Lance le chargement initial de la page "Journalier"
+document.addEventListener('DOMContentLoaded', () => {
   const today = new Date();
   const dateStr = today.toISOString().split('T')[0];
   document.getElementById('daily-date').value = dateStr;
   loadDailyData(dateStr);
-}
-
+});
