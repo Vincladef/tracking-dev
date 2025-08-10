@@ -93,8 +93,10 @@ function renderLikertChart(id, history) {
     colors.push(ANSWER_COLORS[value] || 'rgba(209,213,219,0.9)');
   }
   
-  // Ajuste la largeur du canvas pour éviter l'écrasement des barres
-  chartEl.width = Math.max(300, labels.length * 24);
+  // Ajuste la largeur du canvas pour éviter l'écrasement des barres et permettre le défilement
+  const px = Math.max(300, labels.length * 24);
+  chartEl.style.width = px + 'px';
+  chartEl.style.minWidth = px + 'px';
 
   const chartData = {
     labels: labels,
@@ -131,10 +133,10 @@ function renderLikertChart(id, history) {
       legend: { display: false },
       tooltip: {
         callbacks: {
-          label: function(context) {
-            const value = context.raw;
-            const label = Object.keys(ANSWER_VALUES).find(key => ANSWER_VALUES[key] === value);
-            return ANSWER_LABELS[label] || "Non répondu";
+          label: (ctx) => {
+            const v = Number(ctx.raw);
+            const map = { 1:'Oui', 0.75:'Plutôt oui', 0.25:'Moyen', 0:'Plutôt non', [-1]:'Non' };
+            return map[v] ?? 'Non répondu';
           }
         }
       }
@@ -308,6 +310,7 @@ function handleDailyAnswer(e) {
   const q = dailyData.find(d => d.id === questionId);
 
   if (!q) return;
+  q.history = q.history || [];
 
   const currentAnswer = clean(q.history?.[0]?.value);
   if (currentAnswer === answerValue) {
@@ -520,6 +523,7 @@ function handlePracticeAnswer(e) {
   const q = practiceData.find(d => d.id === questionId);
 
   if (!q) return;
+  q.history = q.history || [];
 
   const currentAnswer = btn.closest('.flex').querySelector('.bg-blue-500')?.dataset.value || null;
 
