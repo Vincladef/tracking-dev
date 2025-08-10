@@ -220,6 +220,109 @@ async function initApp() {
       alert("❌ Erreur lors du chargement du formulaire de pratique.");
     }
   }
+  
+  // Mini chart Likert dans l'historique
+  function renderLikertChart(parentEl, history, normalize) {
+    // on prend max 30 points, ancien -> récent (gauche -> droite)
+    const MAX_POINTS = 30;
+    const levels = ["non", "plutot non", "moyen", "plutot oui", "oui"];
+    const labelByNorm = {
+      "non": "Non", "plutot non": "Plutôt non", "moyen": "Moyen",
+      "plutot oui": "Plutôt oui", "oui": "Oui"
+    };
+
+    const points = (history || [])
+      .slice(0, MAX_POINTS)           // récent->ancien fourni par backend → on coupe
+      .reverse()                      // puis on inverse pour ancien->récent
+      .map(e => {
+        const v = normalize(e.value);
+        const idx = levels.indexOf(v);
+        return (idx === -1) ? null : { v, idx };
+      })
+      .filter(Boolean);
+
+    if (points.length < 2) return; // rien à tracer
+
+    // Canvas retina friendly
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = 560, cssH = 140;
+    const pad = { l: 70, r: 8, t: 10, b: 24 };
+    const w = cssW - pad.l - pad.r;
+    const h = cssH - pad.t - pad.b;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+    canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px";
+    canvas.className = "w-full block mb-3 rounded";
+    parentEl.appendChild(canvas);
+
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    // fond
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, cssW, cssH);
+
+    // grille horizontale + labels Likert
+    ctx.strokeStyle = "#e5e7eb"; // gris clair
+    ctx.lineWidth = 1;
+    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+    ctx.fillStyle = "#374151"; // gris foncé pour labels
+
+    for (let i = 0; i < levels.length; i++) {
+      const y = pad.t + (h / (levels.length - 1)) * i; // 0=haut, 4=bas
+      ctx.beginPath();
+      ctx.moveTo(pad.l, y);
+      ctx.lineTo(pad.l + w, y);
+      ctx.stroke();
+
+      // label à gauche
+      const lab = labelByNorm[levels[i]] || levels[i];
+      ctx.fillText(lab, 8, y + 4);
+    }
+
+    // grille verticale (ticks x)
+    const n = points.length;
+    const step = n > 1 ? w / (n - 1) : w;
+    const xTickEvery = Math.max(1, Math.floor(n / 6)); // ~6 ticks max
+    ctx.strokeStyle = "#f3f4f6";
+    for (let i = 0; i < n; i += xTickEvery) {
+      const x = pad.l + i * step;
+      ctx.beginPath();
+      ctx.moveTo(x, pad.t);
+      ctx.lineTo(x, pad.t + h);
+      ctx.stroke();
+    }
+
+    // courbe
+    ctx.strokeStyle = "#2563eb"; // bleu
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const x = pad.l + i * step;
+      const y = pad.t + (h / (levels.length - 1)) * (levels.indexOf(p.v));
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // points
+    ctx.fillStyle = "#1f2937";
+    points.forEach((p, i) => {
+      const x = pad.l + i * step;
+      const y = pad.t + (h / (levels.length - 1)) * (levels.indexOf(p.v));
+      ctx.beginPath();
+      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // axe x (nominal, on laisse sans labels de dates pour rester compact)
+    ctx.strokeStyle = "#9ca3af";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, pad.t + h);
+    ctx.lineTo(pad.l + w, pad.t + h);
+    ctx.stroke();
+  }
 
   // Renderer commun (journalier & pratique)
   function renderQuestions(questions) {
@@ -332,49 +435,13 @@ async function initApp() {
         const historyBlock = document.createElement("div");
         historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
 
-        // ==== Stats compactes (sur les 10 dernières) ====
-        const LIMIT = 10;           // nombre d'éléments visibles par défaut
-        const STATS_WINDOW = 10;    // stats calculées sur les 10 dernières
-        const SCORE_MAP = { "oui": 1, "plutot oui": 0.75, "moyen": 0.25, "plutot non": 0, "non": -1, "pas de reponse": 0 };
-        const POSITIVE = new Set(["oui", "plutot oui"]);
-        const parseDateFromEntry = (entry) => {
-          const s = entry.date || entry.key || "";
-          const m1 = s.match(/^(\d{2}\/\d{2}\/\d{4})$/);
-          const m2 = s.match(/\((\d{2}\/\d{2}\/\d{4})\)/);
-          const str = m1 ? m1[1] : (m2 ? m2[1] : null);
-          if (!str) return null;
-          const [dd, mm, yyyy] = str.split("/");
-          return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
-        };
-        const hist = (q.history || []).map(e => {
-          const v = normalize(e.value);
-          return { raw: e, v, score: (SCORE_MAP[v] ?? null), isPos: POSITIVE.has(v), date: parseDateFromEntry(e) };
-        });
+        // ==== Graphe Likert + 2 stats compactes (sur 30 dernières) ====
+        // 1) Graphe Likert dans l'historique
+        renderLikertChart(historyBlock, q.history, normalize);
         
-        // fenêtrage : on prend les 10 plus récentes
-        const windowHist = hist.slice(0, STATS_WINDOW);
-        const last = windowHist[0] || null; // dernière réponse (la plus récente)
-        const lastScores = windowHist.filter(h => typeof h.score === "number");
-        
-        // moyenne sur les 10 dernières
-        const avg10 = lastScores.length ? (lastScores.reduce((s,h)=>s+h.score,0) / lastScores.length) : null;
-        
-        // taux positifs sur les 10 dernières
-        const posRate10 = windowHist.length ? (windowHist.filter(h => h.isPos).length / windowHist.length) : null;
-        
-        // streak actuelle & meilleure (sur la fenêtre de 10)
-        let currentStreak = 0, bestStreak = 0, run = 0;
-        windowHist.forEach((h, idx) => { if (h.isPos) { run++; bestStreak = Math.max(bestStreak, run); if (idx===0) currentStreak = run; } else { if (idx===0) currentStreak = 0; run = 0; } });
-        
-        // jours depuis la dernière positive (dans la fenêtre)
-        let daysSincePositive = null;
-        const lastPos = windowHist.find(h => h.isPos && h.date);
-        if (lastPos) {
-          const MS = 86400000;
-          daysSincePositive = Math.floor((new Date().setHours(0,0,0,0) - lastPos.date.getTime()) / MS);
-        }
-        
-        // rendu badges
+        // 2) Badges : série positive actuelle & réponse la plus fréquente
+        const LIMIT = 10;          // visibles par défaut dans la liste
+        const WINDOW = 30;         // fenêtre d'analyse pour les badges
         const badge = (title, value, tone="blue") => {
           const div = document.createElement("div");
           const tones = {
@@ -389,33 +456,36 @@ async function initApp() {
           div.innerHTML = `<span class="opacity-70">${title}:</span> <span class="font-semibold">${value}</span>`;
           return div;
         };
+        const POSITIVE = new Set(["oui","plutot oui"]);
+        const windowHist = (q.history || []).slice(0, WINDOW); // récent -> ancien
+        
+        // Série actuelle (positifs)
+        let currentStreak = 0;
+        for (const e of windowHist) {
+          if (POSITIVE.has(normalize(e.value))) currentStreak++;
+          else break;
+        }
+        
+        // Réponse la plus fréquente (mode) sur la fenêtre
+        const counts = {};
+        const order = ["non","plutot non","moyen","plutot oui","oui"]; // tie-break logique
+        for (const e of windowHist) {
+          const v = normalize(e.value);
+          counts[v] = (counts[v] || 0) + 1;
+        }
+        let best = null, bestCount = -1;
+        for (const k of order) {
+          const c = counts[k] || 0;
+          if (c > bestCount) { best = k; bestCount = c; }
+        }
+        const pretty = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
         const statsWrap = document.createElement("div");
         statsWrap.className = "mb-3 flex flex-wrap gap-2 items-center";
-        
-        if (last) {
-          const when = last.date ? last.date.toLocaleDateString("fr-FR") : (last.raw.date || last.raw.key || "");
-          statsWrap.appendChild(badge("Dernière réponse", `${when} — ${last.raw.value}`, "purple"));
-        }
-        if (avg10 !== null) {
-          const v = (Math.round(avg10*100)/100).toLocaleString("fr-FR");
-          statsWrap.appendChild(badge("Moyenne (10)", v, "blue"));
-        }
-        if (posRate10 !== null) {
-          const p = Math.round(posRate10*100);
-          const tone = p >= 80 ? "green" : p >= 50 ? "yellow" : "red";
-          statsWrap.appendChild(badge("Taux positifs (10)", `${p}%`, tone));
-        }
-        statsWrap.appendChild(badge("Série actuelle", currentStreak, currentStreak>0 ? "green":"gray"));
-        statsWrap.appendChild(badge("Meilleure série (10)", bestStreak, bestStreak>=5 ? "green":"gray"));
-        if (daysSincePositive !== null) {
-          const tone = daysSincePositive===0 ? "green" : daysSincePositive<=3 ? "yellow":"red";
-          const label = daysSincePositive===0 ? "aujourd’hui" : `${daysSincePositive} j`;
-          statsWrap.appendChild(badge("Depuis la dernière positive", label, tone));
-        }
-        
+        statsWrap.appendChild(badge("Série actuelle (positifs)", currentStreak, currentStreak>0 ? "green":"gray"));
+        if (best) statsWrap.appendChild(badge("Réponse la plus fréquente", pretty[best] || best, "purple"));
         historyBlock.appendChild(statsWrap);
 
-        // ==== Fin stats ====
+        // ==== Liste (10 visibles) + bouton Afficher plus / Réduire ====
         (q.history || []).forEach((entry, idx) => {
           const key = entry.date || entry.key || "";
           const val = entry.value;
@@ -424,7 +494,7 @@ async function initApp() {
 
           const entryDiv = document.createElement("div");
           entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
-          if (idx >= LIMIT) entryDiv.classList.add("hidden","extra-history");
+          if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history");
           entryDiv.innerHTML = `<strong>${key}</strong> – ${val}`;
           historyBlock.appendChild(entryDiv);
         });
@@ -434,11 +504,11 @@ async function initApp() {
           moreBtn.type = "button";
           moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
           let expanded = false; const rest = q.history.length - LIMIT;
-          const setLabel = ()=> moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
+          const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
           setLabel();
-          moreBtn.addEventListener("click", ()=>{ 
-            expanded = !expanded; 
-            historyBlock.querySelectorAll(".extra-history").forEach(el=>el.classList.toggle("hidden",!expanded));
+          moreBtn.addEventListener("click", () => {
+            expanded = !expanded;
+            historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
             setLabel();
           });
           historyBlock.appendChild(moreBtn);
