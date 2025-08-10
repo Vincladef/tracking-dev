@@ -1,12 +1,4 @@
 // ===================================
-//  CONFIG
-// ===================================
-// Remplacez 'YOUR_MACRO_ID' par l'ID de votre application web Google Apps Script
-const API_URL = 'https://script.google.com/macros/s/YOUR_MACRO_ID/exec';
-const URL_PRACTICE = `${API_URL}?mode=practice`;
-const URL_DAILY = `${API_URL}?mode=daily`;
-
-// ===================================
 //  CONSTANTES & HELPERS
 // ===================================
 
@@ -60,6 +52,47 @@ function clean(str) {
     .toLowerCase()
     .trim();
 }
+
+// ===================================
+//  CHARGEMENT DE LA CONFIGURATION
+// ===================================
+// 🧑 Identifier l’utilisateur depuis l’URL
+const urlParams = new URLSearchParams(location.search);
+const user = urlParams.get("user")?.toLowerCase();
+
+if (!user) {
+  alert("❌ Aucun utilisateur indiqué !");
+  throw new Error("Utilisateur manquant");
+}
+
+// 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
+const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
+
+let apiUrl = null;
+
+fetch(`${CONFIG_URL}?user=${user}`)
+  .then(res => res.json())
+  .then(config => {
+    if (config.error) {
+      alert(`❌ Erreur: ${config.error}`);
+      throw new Error(config.error);
+    }
+    
+    apiUrl = config.apiurl;
+    console.log("✅ apiUrl récupérée :", apiUrl);
+
+    if (!apiUrl) {
+      alert("❌ Aucune URL WebApp trouvée pour l’utilisateur.");
+      throw new Error("apiUrl introuvable");
+    }
+
+    initApp(apiUrl);
+  })
+  .catch(err => {
+    alert("❌ Erreur lors du chargement de la configuration.");
+    console.error("Erreur attrapée :", err);
+  });
+
 
 // ===================================
 //  FONCTIONS DE RENDU (GRAPHIQUES)
@@ -163,6 +196,7 @@ function renderDailyScoreChart(data) {
   
   const headers = {};
   data.forEach(q => {
+    q.history = q.history || [];
     q.history.forEach(h => {
       const { value, date } = h;
       if (!headers[date]) headers[date] = [];
@@ -236,10 +270,11 @@ function renderDailyScoreChart(data) {
 // ===================================
 //  GESTION DES PAGES ET DONNÉES
 // ===================================
+
+let dailyData = [];
 const pageDaily = document.getElementById('page-daily');
 const pagePractice = document.getElementById('page-practice');
 
-let dailyData = [];
 
 // Charge les données pour le mode journalier à une date donnée
 async function loadDailyData(dateStr) {
@@ -249,7 +284,7 @@ async function loadDailyData(dateStr) {
   loadingEl.classList.remove('hidden');
 
   try {
-    const url = `${URL_DAILY}&date=${dateStr}`;
+    const url = `${apiUrl}?mode=daily&date=${dateStr}`;
     const response = await fetch(url);
     const data = await response.json();
     dailyData = data;
@@ -363,7 +398,7 @@ async function submitDailyData() {
       }
     });
 
-    const response = await fetch(API_URL, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(dataToSend)
@@ -390,7 +425,8 @@ async function loadPracticeCategories() {
   loadingEl.classList.remove('hidden');
 
   try {
-    const response = await fetch(URL_PRACTICE);
+    const url = `${apiUrl}?mode=practice`;
+    const response = await fetch(url);
     const categories = await response.json();
     categoriesListEl.innerHTML = '';
     categories.forEach(cat => {
@@ -427,7 +463,7 @@ async function loadPracticeQuestions(category) {
   document.getElementById('practice-category-title').textContent = `Pratique délibérée : ${category}`;
 
   try {
-    const url = `${URL_PRACTICE}&category=${encodeURIComponent(category)}`;
+    const url = `${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`;
     const response = await fetch(url);
     const data = await response.json();
     practiceData = data;
@@ -576,7 +612,7 @@ async function submitPracticeData() {
       }
     });
 
-    const response = await fetch(API_URL, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(dataToSend)
@@ -600,29 +636,34 @@ async function submitPracticeData() {
 //  NAVIGATION ET INITIALISATION
 // ===================================
 
-document.getElementById('nav-daily-btn').addEventListener('click', () => {
-  pageDaily.classList.remove('hidden');
-  pagePractice.classList.add('hidden');
-  loadDailyData(document.getElementById('daily-date').value);
-});
+function initApp(api) {
+  // L'URL de l'API est maintenant disponible via la variable `api`
+  apiUrl = api;
 
-document.getElementById('nav-practice-btn').addEventListener('click', () => {
-  pagePractice.classList.remove('hidden');
-  pageDaily.classList.add('hidden');
-  loadPracticeCategories();
-});
+  // L'initialisation de l'application peut commencer
+  document.getElementById('nav-daily-btn').addEventListener('click', () => {
+    pageDaily.classList.remove('hidden');
+    pagePractice.classList.add('hidden');
+    loadDailyData(document.getElementById('daily-date').value);
+  });
 
-document.getElementById('daily-date').addEventListener('change', (e) => {
-  loadDailyData(e.target.value);
-});
+  document.getElementById('nav-practice-btn').addEventListener('click', () => {
+    pagePractice.classList.remove('hidden');
+    pageDaily.classList.add('hidden');
+    loadPracticeCategories();
+  });
 
-document.getElementById('daily-submit-btn').addEventListener('click', submitDailyData);
-document.getElementById('practice-submit-btn').addEventListener('click', submitPracticeData);
+  document.getElementById('daily-date').addEventListener('change', (e) => {
+    loadDailyData(e.target.value);
+  });
 
-// Lance le chargement initial de la page "Journalier"
-document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('daily-submit-btn').addEventListener('click', submitDailyData);
+  document.getElementById('practice-submit-btn').addEventListener('click', submitPracticeData);
+
+  // Lance le chargement initial de la page "Journalier"
   const today = new Date();
   const dateStr = today.toISOString().split('T')[0];
   document.getElementById('daily-date').value = dateStr;
   loadDailyData(dateStr);
-});
+}
+
