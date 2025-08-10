@@ -36,6 +36,9 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
   });
 
 async function initApp() {
+  // Stocker les valeurs de délai en mémoire pour les conserver entre les re-renders
+  window.__delayValues = {};
+
   // Titre dynamique
   document.getElementById("user-title").textContent =
     `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
@@ -142,6 +145,9 @@ async function initApp() {
     const formData = new FormData(form);
     const entries = Object.fromEntries(formData.entries());
 
+    // ✅ Fusionner les valeurs de délai stockées en mémoire avec les autres entrées
+    Object.assign(entries, window.__delayValues || {});
+
     const selected = dateSelect.selectedOptions[0];
     const mode = selected?.dataset.mode || "daily";
 
@@ -165,6 +171,8 @@ async function initApp() {
       .then(() => {
         alert("✅ Réponses envoyées !");
         console.log("✅ Réponses envoyées avec succès.");
+        // Log pour vérifier que le payload est envoyé correctement
+        console.log("Payload envoyé :", entries);
       })
       .catch(err => {
         alert("❌ Erreur d’envoi");
@@ -237,8 +245,8 @@ async function initApp() {
     };
 
     const points = (history || [])
-      .slice(0, MAX_POINTS)         // récent->ancien fourni par backend → on coupe
-      .reverse()                  // puis on inverse pour ancien->récent
+      .slice(0, MAX_POINTS)           // récent->ancien fourni par backend → on coupe
+      .reverse()                     // puis on inverse pour ancien->récent
       .map(e => {
         const v = normalize(e.value);
         const idx = levels.indexOf(v);
@@ -347,6 +355,56 @@ async function initApp() {
     ctx.stroke();
   }
 
+  // Helper pour ajouter le bouton "Délai"
+  function addDelayUI(wrapper, q) {
+    const mode = document.getElementById("date-select").selectedOptions[0]?.dataset.mode || "daily";
+    // window.__delays n'est plus utilisé, les valeurs sont dans __delayValues
+    const label = q.id;
+    const key = (mode === "daily" ? `__delayDays__` : `__delayIter__`) + label;
+
+    const row = document.createElement("div");
+    row.className = "mt-2 flex items-center gap-3";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "text-sm text-blue-600 hover:underline";
+    btn.textContent = "⏱️ Délai";
+    row.appendChild(btn);
+
+    const info = document.createElement("span");
+    info.className = "text-xs text-gray-500";
+    // ✅ Gérer les deux cas potentiels
+    const infos = [];
+    if (q.scheduleInfo?.nextDate) infos.push(`Prochaine : ${q.scheduleInfo.nextDate}`);
+    if (q.scheduleInfo?.nextIter != null && q.scheduleInfo?.currentIter != null)
+      infos.push(`Prochaine itération : N=${q.scheduleInfo.nextIter}`);
+    info.textContent = infos.join(" — ");
+
+    // Bonus UX : réafficher la valeur de délai si elle est déjà stockée
+    if (window.__delayValues && window.__delayValues[key]) {
+      const n = window.__delayValues[key];
+      info.textContent = mode === "daily" ? `Délai choisi : ${n} j` : `Délai choisi : ${n} itérations`;
+    }
+
+    row.appendChild(info);
+
+    btn.addEventListener("click", () => {
+      const msg = mode === "daily" ? "Délai en jours (0,1,2,3,7,14...)" : "Délai en itérations (0,1,2,3,5...)";
+      const raw = prompt(msg, "1");
+      if (raw === null) return;
+      const n = parseInt(raw, 10);
+      if (Number.isNaN(n) || n < 0) { alert("Nombre invalide"); return; }
+
+      // ✅ Mémoriser simplement la valeur
+      window.__delayValues[key] = String(n);
+      info.textContent = mode === "daily" ? `Délai choisi : ${n} j` : `Délai choisi : ${n} itérations`;
+      console.log(`✅ Délai de ${n} ${mode === "daily" ? "jour(s)" : "itération(s)"} ajouté pour la question "${q.label}"`);
+      console.log("Valeurs de délai en mémoire :", window.__delayValues);
+    });
+
+    wrapper.appendChild(row);
+  }
+
   // Renderer commun (journalier & pratique)
   function renderQuestions(questions) {
     const container = document.getElementById("daily-form");
@@ -371,33 +429,12 @@ async function initApp() {
       "pas de reponse": "bg-gray-200 text-gray-700 italic"
     };
 
-    const DELAYS = [0, 1, 2, 3, 5, 8, 13];
+    // ✅ La constante DELAYS a été retirée, elle n'est plus utilisée.
 
     (questions || []).forEach(q => {
       // Log détaillé pour chaque question
       console.groupCollapsed(`[Question] Traitement de "${q.label}"`);
-
-      const selectedMode = document.getElementById("date-select")
-        .selectedOptions[0]?.dataset.mode || "daily";
-
       console.log("-> Type de question :", q.type);
-      console.log("-> Est Répétition Espacée :", q.isSpaced);
-
-      if (q.isSpaced && q.spacedInfo) {
-        if (selectedMode === "practice") {
-          const s = q.spacedInfo.streak ?? 0;
-          const delay = q.spacedInfo.delayIter ?? 0;
-          console.log("-> Streak positif (itérations d'affilée):", s);
-          console.log(`-> Délai avant réapparition: ${delay} itération(s)`);
-        } else {
-          const delay = DELAYS[q.spacedInfo.score] ?? "?";
-          console.log("-> Score de Répétition :", q.spacedInfo.score);
-          console.log(`-> Prochain délai : ${delay} jour(s)`);
-          console.log("-> Dernière réponse :", q.spacedInfo.lastDate ?? "—");
-          console.log("-> Prochaine date due :", q.spacedInfo.nextDate ?? "—");
-        }
-      }
-
       console.log("-> Est-elle affichée ? :", !q.skipped);
       if (q.skipped) {
         console.log("-> Raison du masquage :", q.reason);
@@ -437,11 +474,7 @@ async function initApp() {
         reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
         wrapper.appendChild(reason);
 
-        const hidden = document.createElement("input");
-        hidden.type = "hidden";
-        hidden.name = q.id;
-        hidden.value = "";
-        wrapper.appendChild(hidden);
+        // Pas d'input caché ici, on gère les questions masquées côté back
       } else {
         let input;
         const type = (q.type || "").toLowerCase();
@@ -450,7 +483,7 @@ async function initApp() {
           input = document.createElement("div");
           input.className = "space-x-6 text-gray-700";
           input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-           <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
+            <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
         } else if (type.includes("menu") || type.includes("likert")) {
           input = document.createElement("select");
           input.name = q.id;
@@ -477,6 +510,7 @@ async function initApp() {
         }
 
         wrapper.appendChild(input);
+        addDelayUI(wrapper, q); // Appel du nouveau helper ici
       }
 
       // 📓 Historique (compatible daily et practice)
