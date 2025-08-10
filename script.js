@@ -8,7 +8,7 @@ if (!user) {
 }
 
 // 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
-const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
+const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgJJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
 
 let apiUrl = null;
 
@@ -173,7 +173,7 @@ async function initApp() {
   });
 
   // =========================
-  //   Chargements / Renders
+  //   Chargements / Renders
   // =========================
 
   function clearFormUI() {
@@ -237,8 +237,8 @@ async function initApp() {
     };
 
     const points = (history || [])
-      .slice(0, MAX_POINTS)         // récent->ancien fourni par backend → on coupe
-      .reverse()                  // puis on inverse pour ancien->récent
+      .slice(0, MAX_POINTS) // récent->ancien fourni par backend → on coupe
+      .reverse() // puis on inverse pour ancien->récent
       .map(e => {
         const v = normalize(e.value);
         const idx = levels.indexOf(v);
@@ -299,20 +299,27 @@ async function initApp() {
       ctx.lineTo(x, pad.t + h);
       ctx.stroke();
     }
-
-    // labels de dates sous l'axe X
+    
+    // labels de dates sous l'axe X (JJ/MM si possible)
     ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
-    ctx.fillStyle = "#6b7280"; // gris pour les dates
+    ctx.fillStyle = "#6b7280";
     for (let i = 0; i < n; i += xTickEvery) {
       const x = pad.l + i * step;
-      const entryIdx = i; // correspond à l'index dans points
-      const histIdx = (history.length - points.length) + entryIdx;
-      const dateStr = history[histIdx]?.date || history[histIdx]?.key || "";
-      if (dateStr) {
-        // on formate la date ou l'itération
-        const formattedLabel = dateStr.includes('/') ? dateStr.substring(0, 5) : `N=${dateStr}`;
-        ctx.fillText(formattedLabel, x - 16, pad.t + h + 14); // petit offset
+      const histIdx = (history.length - points.length) + i;
+      const rawKey = history[histIdx]?.key || "";
+      const rawDate = history[histIdx]?.date || "";
+
+      let label = "";
+      if (rawDate) {
+        // JJ/MM
+        label = rawDate.slice(0, 5);
+      } else {
+        // tente d'extraire une date depuis la clé
+        const m = rawKey.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (m) label = `${m[1]}/${m[2]}`;
       }
+
+      if (label) ctx.fillText(label, x - 16, pad.t + h + 14);
     }
 
     // courbe
@@ -450,7 +457,7 @@ async function initApp() {
           input = document.createElement("div");
           input.className = "space-x-6 text-gray-700";
           input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-           <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
+            <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
         } else if (type.includes("menu") || type.includes("likert")) {
           input = document.createElement("select");
           input.name = q.id;
@@ -482,18 +489,19 @@ async function initApp() {
       // 📓 Historique (compatible daily et practice)
       if (q.history && q.history.length > 0) {
         console.log(`📖 Affichage de l'historique pour "${q.label}" (${q.history.length} entrées)`);
+
         const toggleBtn = document.createElement("button");
         toggleBtn.type = "button";
         toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
         toggleBtn.textContent = "📓 Voir l’historique des réponses";
 
+        // rendre le conteneur déroulant quand il y a beaucoup d'entrées
         const historyBlock = document.createElement("div");
-        historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
+        historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden max-h-80 overflow-y-auto";
 
         // Graphe Likert + 2 stats compactes (sur 30 dernières)
         renderLikertChart(historyBlock, q.history, normalize);
 
-        const LIMIT = 10;
         const WINDOW = 30;
         const badge = (title, value, tone="blue") => {
           const div = document.createElement("div");
@@ -509,14 +517,11 @@ async function initApp() {
           div.innerHTML = `<span class="opacity-70">${title}:</span> <span class="font-semibold">${value}</span>`;
           return div;
         };
-        const POSITIVE = new Set(["oui","plutot oui"]);
-        const windowHist = (q.history || []).slice(0, WINDOW);
 
-        let currentStreak = 0;
-        for (const e of windowHist) {
-          if (POSITIVE.has(normalize(e.value))) currentStreak++;
-          else break;
-        }
+        // Bonus: utilise q.spacedInfo.streak du backend
+        const currentStreak = q.spacedInfo?.streak ?? 0;
+
+        const windowHist = (q.history || []).slice(0, WINDOW);
 
         const counts = {};
         const order = ["non","plutot non","moyen","plutot oui","oui"];
@@ -536,8 +541,16 @@ async function initApp() {
         if (best) statsWrap.appendChild(badge("Réponse la plus fréquente", pretty[best] || best, "purple"));
         historyBlock.appendChild(statsWrap);
 
-        // Liste (10 visibles) + bouton Afficher plus / Réduire
-        (q.history || []).forEach((entry, idx) => {
+        // tri côté front par sécurité (au cas où), du plus récent au plus ancien
+        const getTs = (item) => {
+          const s = item.date || item.key || "";
+          const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+          if (!m) return -Infinity;
+          return new Date(`${m[3]}-${m[2]}-${m[1]}`).getTime();
+        };
+        const histSorted = [...(q.history || [])].sort((a, b) => getTs(b) - getTs(a));
+
+        histSorted.forEach((entry) => {
           const key = entry.date || entry.key || "";
           const val = entry.value;
           const normalized = normalize(val);
@@ -545,25 +558,9 @@ async function initApp() {
 
           const entryDiv = document.createElement("div");
           entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
-          if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history");
           entryDiv.innerHTML = `<strong>${key}</strong> – ${val}`;
           historyBlock.appendChild(entryDiv);
         });
-
-        if (q.history && q.history.length > LIMIT) {
-          const moreBtn = document.createElement("button");
-          moreBtn.type = "button";
-          moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-          let expanded = false; const rest = q.history.length - LIMIT;
-          const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
-          setLabel();
-          moreBtn.addEventListener("click", () => {
-            expanded = !expanded;
-            historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
-            setLabel();
-          });
-          historyBlock.appendChild(moreBtn);
-        }
 
         toggleBtn.addEventListener("click", () => {
           historyBlock.classList.toggle("hidden");
