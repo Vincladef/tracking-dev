@@ -3,12 +3,12 @@ const urlParams = new URLSearchParams(location.search);
 const user = urlParams.get("user")?.toLowerCase();
 
 if (!user) {
-  alert("❌ Aucun utilisateur indiqué !");
+  showToast("❌ Aucun utilisateur indiqué !", "red");
   throw new Error("Utilisateur manquant");
 }
 
 // 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
-const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
+const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqmE1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
 
 let apiUrl = null;
 
@@ -16,7 +16,7 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
   .then(res => res.json())
   .then(config => {
     if (config.error) {
-      alert(`❌ Erreur: ${config.error}`);
+      showToast(`❌ ${config.error}`, "red");
       throw new Error(config.error);
     }
 
@@ -24,16 +24,38 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
     console.log("✅ API URL récupérée :", apiUrl);
 
     if (!apiUrl) {
-      alert("❌ Aucune URL WebApp trouvée pour l’utilisateur.");
+      showToast("❌ Aucune URL WebApp trouvée pour l’utilisateur.", "red");
       throw new Error("API URL introuvable");
     }
 
     initApp();
   })
   .catch(err => {
-    alert("❌ Erreur lors du chargement de la configuration.");
+    showToast("❌ Erreur lors du chargement de la configuration.", "red");
     console.error("Erreur attrapée :", err);
   });
+
+// ---- Toast minimal (non bloquant) ----
+function ensureToast() {
+  let t = document.getElementById("toast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "toast";
+    t.className = "fixed top-4 right-4 hidden z-50";
+    document.body.appendChild(t);
+  }
+  return t;
+}
+
+function showToast(message, tone = "green") {
+  const t = ensureToast();
+  const bg = tone === "red" ? "bg-red-600" : tone === "blue" ? "bg-blue-600" : "bg-green-600";
+  t.className = `fixed top-4 right-4 ${bg} text-white px-4 py-2 rounded shadow z-50`;
+  t.textContent = message;
+  t.classList.remove("hidden");
+  clearTimeout(t._hideTimer);
+  t._hideTimer = setTimeout(() => t.classList.add("hidden"), 2400);
+}
 
 async function initApp() {
   // ✅ Mémoire des délais sélectionnés (clé -> valeur)
@@ -124,6 +146,9 @@ async function initApp() {
   dateSelect.addEventListener("change", handleSelectChange);
 
   function handleSelectChange() {
+    // on repart propre à chaque changement
+    if (window.__delayValues) window.__delayValues = {};
+    
     const sel = document.getElementById("date-select");
     if (!sel || !sel.selectedOptions.length) return;
     const selected = sel.selectedOptions[0];
@@ -162,21 +187,56 @@ async function initApp() {
 
     console.log("📦 Envoi des données au Worker...", entries);
 
+    const btn = document.getElementById("submitBtn");
+    btn.disabled = true;
+    btn.classList.add("opacity-60", "cursor-not-allowed");
+    const btnPrev = btn.innerHTML;
+    btn.innerHTML = `
+      <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      Envoi...
+    `;
+    
     fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
       method: "POST",
       body: JSON.stringify(entries),
       headers: { "Content-Type": "application/json" }
     })
-      .then(res => res.text())
-      .then(() => {
-        alert("✅ Réponses envoyées !");
-        console.log("✅ Réponses envoyées avec succès.");
-        // Log pour vérifier que le payload est envoyé correctement
-        console.log("Payload envoyé :", entries);
+      .then(async (res) => {
+        const text = await res.text().catch(() => "");
+        if (!res.ok) throw new Error(text || "HTTP " + res.status);
+        // succès
+        showToast("✅ Réponses envoyées !");
+        console.log("✅ Réponses envoyées avec succès.", { payload: entries });
+
+        // recharge automatiquement la vue pour refléter les délais posés
+        const selected = dateSelect.selectedOptions[0];
+        const mode = selected?.dataset.mode || "daily";
+
+        // on peut vider les délais mémorisés pour repartir propre
+        if (window.__delayValues) window.__delayValues = {};
+
+        setTimeout(() => {
+          if (mode === "practice") {
+            // recharge la même catégorie → le backend calculera l’itération suivante
+            loadPracticeForm(selected.dataset.category);
+            showToast("➡️ Itération suivante chargée", "blue");
+          } else {
+            // recharge la même date → masquera les questions avec un délai > 0
+            loadFormForDate(selected.dataset.date);
+          }
+        }, 250);
       })
       .catch(err => {
-        alert("❌ Erreur d’envoi");
         console.error("❌ Erreur lors de l’envoi des données :", err);
+        showToast("❌ Erreur d’envoi", "red");
+      })
+      .finally(() => {
+        btn.disabled = false;
+        btn.classList.remove("opacity-60", "cursor-not-allowed");
+        btn.innerHTML = btnPrev;
       });
   });
 
@@ -211,7 +271,7 @@ async function initApp() {
       .catch(err => {
         document.getElementById("loader")?.classList.add("hidden");
         console.error(err);
-        alert("❌ Erreur de chargement du formulaire journalier.");
+        showToast("❌ Erreur de chargement du formulaire", "red");
       });
   }
 
@@ -229,7 +289,7 @@ async function initApp() {
     } catch (e) {
       document.getElementById("loader")?.classList.add("hidden");
       console.error(e);
-      alert("❌ Erreur lors du chargement du formulaire de pratique.");
+      showToast("❌ Erreur de chargement du formulaire", "red");
     }
   }
 
@@ -355,7 +415,6 @@ async function initApp() {
     ctx.stroke();
   }
 
-  // ✅ Nouvelle fonction addDelayUI
   function addDelayUI(wrapper, q) {
     const mode = document.getElementById("date-select").selectedOptions[0]?.dataset.mode || "daily";
     const key = (mode === "daily" ? `__delayDays__` : `__delayIter__`) + q.id;
@@ -392,6 +451,8 @@ async function initApp() {
     const pop = document.createElement("div");
     pop.className = "absolute right-0 top-8 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 hidden";
     pop.setAttribute("role", "menu");
+    // marquer le popover pour pouvoir fermer les autres
+    pop.setAttribute("data-pop", "delay");
     row.appendChild(pop);
 
     // Options rapides
@@ -467,14 +528,29 @@ async function initApp() {
     });
     actions.appendChild(closeBtn);
 
-    // Toggle popover
+    // Toggle popover + gestion du click outside (attaché à l'ouverture)
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      pop.classList.toggle("hidden");
-    });
 
-    // Fermer si clic à l’extérieur
-    document.addEventListener("click", () => pop.classList.add("hidden"), { once: true });
+      // Ferme les autres popovers ouverts
+      document.querySelectorAll('[data-pop="delay"]').forEach(el => {
+        if (el !== pop) el.classList.add("hidden");
+      });
+
+      pop.classList.toggle("hidden");
+
+      const onOutside = (e) => {
+        if (!pop.contains(e.target) && e.target !== btn) {
+          pop.classList.add("hidden");
+          document.removeEventListener("click", onOutside);
+        }
+      };
+
+      // n'attache le listener global que si on vient d'ouvrir
+      if (!pop.classList.contains("hidden")) {
+        setTimeout(() => document.addEventListener("click", onOutside), 0);
+      }
+    });
   }
 
   // Renderer commun (journalier & pratique)
