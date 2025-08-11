@@ -3,12 +3,18 @@ const urlParams = new URLSearchParams(location.search);
 const user = urlParams.get("user")?.toLowerCase();
 
 if (!user) {
-  showToast("❌ Aucun utilisateur indiqué !", "red");
+  // Remplacer l'alerte par un affichage dans une zone de message
+  const messageBox = document.createElement("div");
+  messageBox.textContent = "❌ Aucun utilisateur indiqué !";
+  messageBox.style.cssText = "position:fixed;top:1rem;right:1rem;padding:1rem;background-color:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:0.5rem;";
+  document.body.appendChild(messageBox);
+  setTimeout(() => messageBox.remove(), 5000);
+
   throw new Error("Utilisateur manquant");
 }
 
 // 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
-const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqmE1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
+const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
 
 let apiUrl = null;
 
@@ -16,7 +22,11 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
   .then(res => res.json())
   .then(config => {
     if (config.error) {
-      showToast(`❌ ${config.error}`, "red");
+      const messageBox = document.createElement("div");
+      messageBox.textContent = `❌ Erreur: ${config.error}`;
+      messageBox.style.cssText = "position:fixed;top:1rem;right:1rem;padding:1rem;background-color:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:0.5rem;";
+      document.body.appendChild(messageBox);
+      setTimeout(() => messageBox.remove(), 5000);
       throw new Error(config.error);
     }
 
@@ -24,46 +34,31 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
     console.log("✅ API URL récupérée :", apiUrl);
 
     if (!apiUrl) {
-      showToast("❌ Aucune URL WebApp trouvée pour l’utilisateur.", "red");
+      const messageBox = document.createElement("div");
+      messageBox.textContent = "❌ Aucune URL WebApp trouvée pour l’utilisateur.";
+      messageBox.style.cssText = "position:fixed;top:1rem;right:1rem;padding:1rem;background-color:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:0.5rem;";
+      document.body.appendChild(messageBox);
+      setTimeout(() => messageBox.remove(), 5000);
       throw new Error("API URL introuvable");
     }
 
     initApp();
   })
   .catch(err => {
-    showToast("❌ Erreur lors du chargement de la configuration.", "red");
+    const messageBox = document.createElement("div");
+    messageBox.textContent = "❌ Erreur lors du chargement de la configuration.";
+    messageBox.style.cssText = "position:fixed;top:1rem;right:1rem;padding:1rem;background-color:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:0.5rem;";
+    document.body.appendChild(messageBox);
+    setTimeout(() => messageBox.remove(), 5000);
     console.error("Erreur attrapée :", err);
   });
 
-// ---- Toast minimal (non bloquant) ----
-function ensureToast() {
-  let t = document.getElementById("toast");
-  if (!t) {
-    t = document.createElement("div");
-    t.id = "toast";
-    t.className = "fixed top-4 right-4 hidden z-50";
-    document.body.appendChild(t);
-  }
-  return t;
-}
-
-function showToast(message, tone = "green") {
-  const t = ensureToast();
-  const bg = tone === "red" ? "bg-red-600" : tone === "blue" ? "bg-blue-600" : "bg-green-600";
-  t.className = `fixed top-4 right-4 ${bg} text-white px-4 py-2 rounded shadow z-50`;
-  t.textContent = message;
-  t.classList.remove("hidden");
-  clearTimeout(t._hideTimer);
-  t._hideTimer = setTimeout(() => t.classList.add("hidden"), 2400);
-}
-
 async function initApp() {
-  // ✅ Mémoire des délais sélectionnés (clé -> valeur)
-  window.__delayValues = window.__delayValues || {};
-
   // Titre dynamique
-  document.getElementById("user-title").textContent =
-    `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
+  const userTitle = document.getElementById("user-title");
+  if (userTitle) {
+      userTitle.textContent = `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
+  }
 
   // On enlève l’ancien affichage de date (non nécessaire avec le sélecteur)
   const dateDisplay = document.getElementById("date-display");
@@ -71,12 +66,15 @@ async function initApp() {
 
   // Références éléments existants
   const dateSelect = document.getElementById("date-select");
-  dateSelect.classList.add("mb-4");
+  if (dateSelect) {
+      dateSelect.classList.add("mb-4");
+  }
 
   // ➡️ Remplir le select avec : Dates (7j) + (optionnel) Mode pratique — catégories
   async function buildCombinedSelect() {
     console.log("🛠️ Création du sélecteur de date et de mode...");
     const sel = document.getElementById("date-select");
+    if (!sel) return;
     sel.innerHTML = "";
 
     // Placeholder
@@ -106,24 +104,26 @@ async function initApp() {
 
     // Groupe Mode pratique (si dispo)
     try {
-      const res = await fetch(`${apiUrl}?mode=practice`);
-      const cats = await res.json();
-      if (Array.isArray(cats) && cats.length) {
-        // Séparateur visuel
-        const sep = document.createElement("option");
-        sep.disabled = true; sep.textContent = "────────";
-        sel.appendChild(sep);
+      if (apiUrl) {
+          const res = await fetch(`${apiUrl}?mode=practice`);
+          const cats = await res.json();
+          if (Array.isArray(cats) && cats.length) {
+            // Séparateur visuel
+            const sep = document.createElement("option");
+            sep.disabled = true; sep.textContent = "────────";
+            sel.appendChild(sep);
 
-        const ogPractice = document.createElement("optgroup");
-        ogPractice.label = "Mode pratique — catégories";
-        cats.forEach(cat => {
-          const o = document.createElement("option");
-          o.textContent = `Mode pratique — ${cat}`;
-          o.dataset.mode = "practice";
-          o.dataset.category = cat;
-          ogPractice.appendChild(o);
-        });
-        sel.appendChild(ogPractice);
+            const ogPractice = document.createElement("optgroup");
+            ogPractice.label = "Mode pratique — catégories";
+            cats.forEach(cat => {
+              const o = document.createElement("option");
+              o.textContent = `Mode pratique — ${cat}`;
+              o.dataset.mode = "practice";
+              o.dataset.category = cat;
+              ogPractice.appendChild(o);
+            });
+            sel.appendChild(ogPractice);
+          }
       }
     } catch (e) {
       console.warn("Impossible de charger les catégories de pratique", e);
@@ -143,12 +143,11 @@ async function initApp() {
   // État initial
   handleSelectChange();
 
-  dateSelect.addEventListener("change", handleSelectChange);
+  if (dateSelect) {
+      dateSelect.addEventListener("change", handleSelectChange);
+  }
 
   function handleSelectChange() {
-    // on repart propre à chaque changement
-    if (window.__delayValues) window.__delayValues = {};
-    
     const sel = document.getElementById("date-select");
     if (!sel || !sel.selectedOptions.length) return;
     const selected = sel.selectedOptions[0];
@@ -163,95 +162,73 @@ async function initApp() {
   }
 
   // 📨 Soumission
-  document.getElementById("submitBtn").addEventListener("click", (e) => {
-    e.preventDefault();
+  const submitBtn = document.getElementById("submitBtn");
+  if (submitBtn) {
+      submitBtn.addEventListener("click", (e) => {
+        e.preventDefault();
 
-    const form = document.getElementById("daily-form");
-    const formData = new FormData(form);
-    const entries = Object.fromEntries(formData.entries());
+        const form = document.getElementById("daily-form");
+        if (!form) return;
 
-    // ⬅️ ajoute les délais choisis via le menu
-    Object.assign(entries, window.__delayValues || {});
+        const formData = new FormData(form);
+        const entries = Object.fromEntries(formData.entries());
 
-    const selected = dateSelect.selectedOptions[0];
-    const mode = selected?.dataset.mode || "daily";
-
-    if (mode === "daily") {
-      entries._mode = "daily";
-      entries._date = selected.dataset.date; // YYYY-MM-DD
-    } else {
-      entries._mode = "practice";
-      entries._category = selected.dataset.category; // nom exact
-    }
-    entries.apiUrl = apiUrl;
-
-    console.log("📦 Envoi des données au Worker...", entries);
-
-    const btn = document.getElementById("submitBtn");
-    btn.disabled = true;
-    btn.classList.add("opacity-60", "cursor-not-allowed");
-    const btnPrev = btn.innerHTML;
-    btn.innerHTML = `
-      <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-      </svg>
-      Envoi...
-    `;
-    
-    fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
-      method: "POST",
-      body: JSON.stringify(entries),
-      headers: { "Content-Type": "application/json" }
-    })
-      .then(async (res) => {
-        const text = await res.text().catch(() => "");
-        if (!res.ok) throw new Error(text || "HTTP " + res.status);
-        // succès
-        showToast("✅ Réponses envoyées !");
-        console.log("✅ Réponses envoyées avec succès.", { payload: entries });
-
-        // recharge automatiquement la vue pour refléter les délais posés
-        const selected = dateSelect.selectedOptions[0];
+        const dateSelect = document.getElementById("date-select");
+        const selected = dateSelect?.selectedOptions[0];
         const mode = selected?.dataset.mode || "daily";
 
-        // on peut vider les délais mémorisés pour repartir propre
-        if (window.__delayValues) window.__delayValues = {};
+        if (mode === "daily") {
+          entries._mode = "daily";
+          entries._date = selected.dataset.date; // YYYY-MM-DD
+        } else {
+          entries._mode = "practice";
+          entries._category = selected.dataset.category; // nom exact
+        }
+        entries.apiUrl = apiUrl;
 
-        setTimeout(() => {
-          if (mode === "practice") {
-            // recharge la même catégorie → le backend calculera l’itération suivante
-            loadPracticeForm(selected.dataset.category);
-            showToast("➡️ Itération suivante chargée", "blue");
-          } else {
-            // recharge la même date → masquera les questions avec un délai > 0
-            loadFormForDate(selected.dataset.date);
-          }
-        }, 250);
-      })
-      .catch(err => {
-        console.error("❌ Erreur lors de l’envoi des données :", err);
-        showToast("❌ Erreur d’envoi", "red");
-      })
-      .finally(() => {
-        btn.disabled = false;
-        btn.classList.remove("opacity-60", "cursor-not-allowed");
-        btn.innerHTML = btnPrev;
+        console.log("📦 Envoi des données au Worker...", entries);
+
+        fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
+          method: "POST",
+          body: JSON.stringify(entries),
+          headers: { "Content-Type": "application/json" }
+        })
+          .then(res => res.text())
+          .then(() => {
+            const messageBox = document.createElement("div");
+            messageBox.textContent = "✅ Réponses envoyées !";
+            messageBox.style.cssText = "position:fixed;top:1rem;right:1rem;padding:1rem;background-color:#d1fae5;color:#065f46;border:1px solid #a7f3d0;border-radius:0.5rem;";
+            document.body.appendChild(messageBox);
+            setTimeout(() => messageBox.remove(), 5000);
+            console.log("✅ Réponses envoyées avec succès.");
+          })
+          .catch(err => {
+            const messageBox = document.createElement("div");
+            messageBox.textContent = "❌ Erreur d’envoi";
+            messageBox.style.cssText = "position:fixed;top:1rem;right:1rem;padding:1rem;background-color:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:0.5rem;";
+            document.body.appendChild(messageBox);
+            setTimeout(() => messageBox.remove(), 5000);
+            console.error("❌ Erreur lors de l’envoi des données :", err);
+          });
       });
-  });
+  }
 
   // =========================
   //   Chargements / Renders
   // =========================
 
   function clearFormUI() {
-    document.getElementById("daily-form").innerHTML = "";
-    document.getElementById("submit-section").classList.add("hidden");
+    const dailyForm = document.getElementById("daily-form");
+    if (dailyForm) dailyForm.innerHTML = "";
+    const submitSection = document.getElementById("submit-section");
+    if (submitSection) submitSection.classList.add("hidden");
   }
 
   function showFormUI() {
-    document.getElementById("daily-form").classList.remove("hidden");
-    document.getElementById("submit-section").classList.remove("hidden");
+    const dailyForm = document.getElementById("daily-form");
+    if (dailyForm) dailyForm.classList.remove("hidden");
+    const submitSection = document.getElementById("submit-section");
+    if (submitSection) submitSection.classList.remove("hidden");
     const loader = document.getElementById("loader");
     if (loader) loader.classList.add("hidden");
   }
@@ -262,17 +239,24 @@ async function initApp() {
     if (loader) loader.classList.remove("hidden");
     console.log(`📡 Chargement des questions pour la date : ${dateISO}`);
 
-    fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}`)
-      .then(res => res.json())
-      .then(questions => {
-        console.log(`✅ ${questions.length} question(s) chargée(s).`);
-        renderQuestions(questions);
-      })
-      .catch(err => {
-        document.getElementById("loader")?.classList.add("hidden");
-        console.error(err);
-        showToast("❌ Erreur de chargement du formulaire", "red");
-      });
+    if (apiUrl) {
+        fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}`)
+          .then(res => res.json())
+          .then(questions => {
+            console.log(`✅ ${questions.length} question(s) chargée(s).`);
+            renderQuestions(questions);
+          })
+          .catch(err => {
+            const loader = document.getElementById("loader");
+            if (loader) loader.classList.add("hidden");
+            console.error(err);
+            const messageBox = document.createElement("div");
+            messageBox.textContent = "❌ Erreur de chargement du formulaire journalier.";
+            messageBox.style.cssText = "position:fixed;top:1rem;right:1rem;padding:1rem;background-color:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:0.5rem;";
+            document.body.appendChild(messageBox);
+            setTimeout(() => messageBox.remove(), 5000);
+          });
+    }
   }
 
   async function loadPracticeForm(category) {
@@ -282,19 +266,27 @@ async function initApp() {
     console.log(`📡 Chargement des questions pour la catégorie : ${category}`);
 
     try {
-      const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`);
-      const questions = await res.json();
-      console.log(`✅ ${questions.length} question(s) de pratique chargée(s).`);
-      renderQuestions(questions);
+      if (apiUrl) {
+          const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`);
+          const questions = await res.json();
+          console.log(`✅ ${questions.length} question(s) de pratique chargée(s).`);
+          renderQuestions(questions);
+      }
     } catch (e) {
-      document.getElementById("loader")?.classList.add("hidden");
+      const loader = document.getElementById("loader");
+      if (loader) loader.classList.add("hidden");
       console.error(e);
-      showToast("❌ Erreur de chargement du formulaire", "red");
+      const messageBox = document.createElement("div");
+      messageBox.textContent = "❌ Erreur lors du chargement du formulaire de pratique.";
+      messageBox.style.cssText = "position:fixed;top:1rem;right:1rem;padding:1rem;background-color:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:0.5rem;";
+      document.body.appendChild(messageBox);
+      setTimeout(() => messageBox.remove(), 5000);
     }
   }
 
   // Mini chart Likert dans l'historique
   function renderLikertChart(parentEl, history, normalize) {
+    if (!parentEl) return;
     // on prend max 30 points, ancien -> récent (gauche -> droite)
     const MAX_POINTS = 30;
     // on inverse les niveaux pour que "oui" soit en haut et "non" en bas
@@ -305,8 +297,8 @@ async function initApp() {
     };
 
     const points = (history || [])
-      .slice(0, MAX_POINTS)           // récent->ancien fourni par backend → on coupe
-      .reverse()                     // puis on inverse pour ancien->récent
+      .slice(0, MAX_POINTS)
+      .reverse()
       .map(e => {
         const v = normalize(e.value);
         const idx = levels.indexOf(v);
@@ -314,7 +306,7 @@ async function initApp() {
       })
       .filter(Boolean);
 
-    if (points.length < 2) return; // rien à tracer
+    if (points.length < 2) return;
 
     // Canvas retina friendly
     const dpr = window.devicePixelRatio || 1;
@@ -330,6 +322,7 @@ async function initApp() {
     parentEl.appendChild(canvas);
 
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     ctx.scale(dpr, dpr);
 
     // fond
@@ -343,14 +336,12 @@ async function initApp() {
     ctx.fillStyle = "#374151"; // gris foncé pour labels
 
     for (let i = 0; i < levels.length; i++) {
-      // on inverse le calcul pour que le label "oui" (i=4) soit en haut
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i);
       ctx.beginPath();
       ctx.moveTo(pad.l, y);
       ctx.lineTo(pad.l + w, y);
       ctx.stroke();
 
-      // label à gauche
       const lab = labelByNorm[levels[i]] || levels[i];
       ctx.fillText(lab, 8, y + 4);
     }
@@ -373,13 +364,12 @@ async function initApp() {
     ctx.fillStyle = "#6b7280"; // gris pour les dates
     for (let i = 0; i < n; i += xTickEvery) {
       const x = pad.l + i * step;
-      const entryIdx = i; // correspond à l'index dans points
+      const entryIdx = i;
       const histIdx = (history.length - points.length) + entryIdx;
       const dateStr = history[histIdx]?.date || history[histIdx]?.key || "";
       if (dateStr) {
-        // on formate la date ou l'itération
         const formattedLabel = dateStr.includes('/') ? dateStr.substring(0, 5) : `N=${dateStr}`;
-        ctx.fillText(formattedLabel, x - 16, pad.t + h + 14); // petit offset
+        ctx.fillText(formattedLabel, x - 16, pad.t + h + 14);
       }
     }
 
@@ -389,7 +379,6 @@ async function initApp() {
     ctx.beginPath();
     points.forEach((p, i) => {
       const x = pad.l + i * step;
-      // on inverse le calcul pour que "oui" (p.idx=4) soit en haut
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
@@ -399,7 +388,6 @@ async function initApp() {
     ctx.fillStyle = "#1f2937";
     points.forEach((p, i) => {
       const x = pad.l + i * step;
-      // on inverse le calcul pour que "oui" (p.idx=4) soit en haut
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
       ctx.beginPath();
       ctx.arc(x, y, 2.5, 0, Math.PI * 2);
@@ -415,147 +403,10 @@ async function initApp() {
     ctx.stroke();
   }
 
-  function addDelayUI(wrapper, q) {
-    const mode = document.getElementById("date-select").selectedOptions[0]?.dataset.mode || "daily";
-    const key = (mode === "daily" ? `__delayDays__` : `__delayIter__`) + q.id;
-
-    const row = document.createElement("div");
-    row.className = "mt-2 flex items-center gap-3 relative"; // relative pour ancrer le popover
-    wrapper.appendChild(row);
-
-    // Bouton
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "text-sm text-blue-600 hover:underline";
-    btn.textContent = "⏱️ Délai";
-    row.appendChild(btn);
-
-    // Info (prochaine échéance / délai choisi)
-    const info = document.createElement("span");
-    info.className = "text-xs text-gray-500";
-    const infos = [];
-    if (q.scheduleInfo?.nextDate) infos.push(`Prochaine : ${q.scheduleInfo.nextDate}`);
-    if (q.scheduleInfo?.nextIter != null && q.scheduleInfo?.currentIter != null)
-      infos.push(`Prochaine itération : N=${q.scheduleInfo.nextIter}`);
-    // réaffiche la valeur déjà choisie si existante
-    if (window.__delayValues[key] != null) {
-      const n = parseInt(window.__delayValues[key], 10);
-      if (!Number.isNaN(n)) {
-        infos.push(mode === "daily" ? `Délai choisi : ${n} j` : `Délai choisi : ${n} itérations`);
-      }
-    }
-    info.textContent = infos.join(" — ") || "";
-    row.appendChild(info);
-
-    // Popover (caché par défaut)
-    const pop = document.createElement("div");
-    pop.className = "absolute right-0 top-8 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 hidden";
-    pop.setAttribute("role", "menu");
-    // marquer le popover pour pouvoir fermer les autres
-    pop.setAttribute("data-pop", "delay");
-    row.appendChild(pop);
-
-    // Options rapides
-    const options = mode === "daily"
-      ? [
-          { label: "Aujourd’hui (0 j)", value: 0 },
-          { label: "+1 j", value: 1 },
-          { label: "+2 j", value: 2 },
-          { label: "+3 j", value: 3 },
-          { label: "1 semaine", value: 7 },
-          { label: "2 semaines", value: 14 },
-          { label: "1 mois (~30 j)", value: 30 }
-        ]
-      : [
-          { label: "0", value: 0 },
-          { label: "1", value: 1 },
-          { label: "2", value: 2 },
-          { label: "3", value: 3 },
-          { label: "5", value: 5 },
-          { label: "8", value: 8 },
-          { label: "13", value: 13 }
-        ];
-
-    const grid = document.createElement("div");
-    grid.className = "p-2 grid grid-cols-2 gap-2";
-    pop.appendChild(grid);
-
-    const setValue = (n) => {
-      window.__delayValues[key] = String(n);
-      info.textContent = mode === "daily"
-        ? `Délai choisi : ${n} j`
-        : `Délai choisi : ${n} itérations`;
-      pop.classList.add("hidden");
-    };
-
-    options.forEach(opt => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "px-2 py-1 text-sm border border-gray-200 rounded hover:bg-gray-50";
-      b.textContent = opt.label;
-      b.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        setValue(opt.value);
-      });
-      grid.appendChild(b);
-    });
-
-    // Ligne d’actions
-    const actions = document.createElement("div");
-    actions.className = "border-t border-gray-100 p-2 flex items-center justify-between";
-    pop.appendChild(actions);
-
-    // Effacer (n=0 => le backend effacera la note → aucun délai)
-    const clearBtn = document.createElement("button");
-    clearBtn.type = "button";
-    clearBtn.className = "text-xs text-red-600 hover:underline";
-    clearBtn.textContent = "Retirer le délai";
-    clearBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      setValue(0);
-      info.textContent = "Aucun délai";
-    });
-    actions.appendChild(clearBtn);
-
-    // Fermer
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "text-xs text-gray-600 hover:underline";
-    closeBtn.textContent = "Fermer";
-    closeBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      pop.classList.add("hidden");
-    });
-    actions.appendChild(closeBtn);
-
-    // Toggle popover + gestion du click outside (attaché à l'ouverture)
-    btn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-
-      // Ferme les autres popovers ouverts
-      document.querySelectorAll('[data-pop="delay"]').forEach(el => {
-        if (el !== pop) el.classList.add("hidden");
-      });
-
-      pop.classList.toggle("hidden");
-
-      const onOutside = (e) => {
-        if (!pop.contains(e.target) && e.target !== btn) {
-          pop.classList.add("hidden");
-          document.removeEventListener("click", onOutside);
-        }
-      };
-
-      // n'attache le listener global que si on vient d'ouvrir
-      if (!pop.classList.contains("hidden")) {
-        setTimeout(() => document.addEventListener("click", onOutside), 0);
-      }
-    });
-  }
-
   // Renderer commun (journalier & pratique)
   function renderQuestions(questions) {
     const container = document.getElementById("daily-form");
+    if (!container) return;
     container.innerHTML = "";
     console.log(`✍️ Rendu de ${questions.length} question(s)`);
 
@@ -572,15 +423,38 @@ async function initApp() {
       "oui": "bg-green-100 text-green-800",
       "plutot oui": "bg-green-50 text-green-700",
       "moyen": "bg-yellow-100 text-yellow-800",
-      "plutot non": "bg-red-100 text-red-900",
+      "plutot non": "bg-red-100 text-red-700",
       "non": "bg-red-200 text-red-900",
       "pas de reponse": "bg-gray-200 text-gray-700 italic"
     };
 
+    const DELAYS = [0, 1, 2, 3, 5, 8, 13];
+
     (questions || []).forEach(q => {
-      // Log détaillé pour chaque question
       console.groupCollapsed(`[Question] Traitement de "${q.label}"`);
+
+      const dateSelect = document.getElementById("date-select");
+      const selectedMode = dateSelect?.selectedOptions[0]?.dataset.mode || "daily";
+
       console.log("-> Type de question :", q.type);
+      console.log("-> Est Répétition Espacée :", q.isSpaced);
+
+      if (q.isSpaced && q.spacedInfo) {
+        if (selectedMode === "practice") {
+          const s = q.spacedInfo.streak ?? 0;
+          const delay = q.spacedInfo.delayIter ?? 0;
+          console.log("-> Streak positif (itérations d'affilée):", s);
+          console.log(`-> Délai avant réapparition: ${delay} itération(s)`);
+        } else {
+          const score = q.spacedInfo.score ?? -1;
+          const delay = DELAYS[score] ?? "?";
+          console.log("-> Score de Répétition :", q.spacedInfo.score);
+          console.log(`-> Prochain délai : ${delay} jour(s)`);
+          console.log("-> Dernière réponse :", q.spacedInfo.lastDate ?? "—");
+          console.log("-> Prochaine date due :", q.spacedInfo.nextDate ?? "—");
+        }
+      }
+
       console.log("-> Est-elle affichée ? :", !q.skipped);
       if (q.skipped) {
         console.log("-> Raison du masquage :", q.reason);
@@ -598,7 +472,7 @@ async function initApp() {
       // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
       let referenceAnswer = "";
       if (q.history && Array.isArray(q.history)) {
-        const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
+        const dateISO = document.getElementById("date-select")?.selectedOptions[0]?.dataset.date;
         if (dateISO) {
           const entry = q.history.find(entry => {
             if (entry?.date) {
@@ -620,7 +494,11 @@ async function initApp() {
         reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
         wrapper.appendChild(reason);
 
-        // Pas d'input caché ici, on gère les questions masquées côté back
+        const hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = q.id;
+        hidden.value = "";
+        wrapper.appendChild(hidden);
       } else {
         let input;
         const type = (q.type || "").toLowerCase();
@@ -656,7 +534,6 @@ async function initApp() {
         }
 
         wrapper.appendChild(input);
-        addDelayUI(wrapper, q); // Appel du nouveau helper ici
       }
 
       // 📓 Historique (compatible daily et practice)
