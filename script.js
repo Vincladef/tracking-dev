@@ -301,14 +301,12 @@ async function initApp() {
 
   // Remplace TOUTE ta fonction renderLikertChart par celle-ci
   function renderLikertChart(parentEl, history, normalize) {
-    // garde-fous
     const hist = Array.isArray(history) ? history.slice() : [];
     if (!hist.length) return;
 
-    // —— 1) Ordonner ancien -> récent (pour que le récent soit à DROITE)
-    // essaie d'abord une date JJ/MM/AAAA, sinon un N d'itération dans la clé, sinon l'ordre d'origine
+    // ---- Ordonner ancien -> récent (récent à DROITE)
     const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
-    const iterRe = /\b(\d+)\s*\(/; // "Badminton 12 (..."
+    const iterRe = /\b(\d+)\s*\(/; // ex: "Badminton 12 (..)"
     const toKey = (e, idx) => {
       if (e.date && dateRe.test(e.date)) {
         const [, d, m, y] = e.date.match(dateRe);
@@ -318,43 +316,38 @@ async function initApp() {
         const [, d, m, y] = e.key.match(dateRe);
         return new Date(`${y}-${m}-${d}`).getTime();
       }
-      if (e.key && iterRe.test(e.key)) {
-        return parseInt(e.key.match(iterRe)[1], 10); // itération
-      }
+      if (e.key && iterRe.test(e.key)) return parseInt(e.key.match(iterRe)[1], 10);
       return idx; // fallback: ordre fourni
     };
+    const ordered = hist.map((e,i)=>({e,k:toKey(e,i)})).sort((a,b)=>a.k-b.k).map(x=>x.e);
 
-    const ordered = hist
-      .map((e, i) => ({ e, k: toKey(e, i) }))
-      .sort((a, b) => a.k - b.k)  // ANCIEN -> RÉCENT
-      .map(x => x.e);
-
-    // fenêtre max
-    const MAX_POINTS = 60;                  // on peut en afficher plus qu'avant
-    const windowed = ordered.slice(-MAX_POINTS); // on garde les plus récents si trop long
-
-    // transformer en niveaux likert (0..4) – 0=non en bas, 4=oui en haut
+    // ---- Points Likert
     const levels = ["non","plutot non","moyen","plutot oui","oui"];
     const labelByNorm = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
-    const points = windowed
-      .map(e => {
-        const v = normalize(e.value);
-        const idx = levels.indexOf(v);
-        return (idx === -1) ? null : { v, idx, raw:e };
-      })
-      .filter(Boolean);
-
+    const points = ordered.map(e => {
+      const v = normalize(e.value);
+      const idx = levels.indexOf(v);
+      return (idx === -1) ? null : { v, idx, raw:e };
+    }).filter(Boolean);
     if (points.length < 2) return;
 
-    // —— 2) Scroller horizontal et largeur dynamique
-    const stepPx = 28; // espacement horizontal par point
+    // ---- Layout responsive + scrollable (mobile)
     const pad = { l: 70, r: 16, t: 10, b: 28 };
-    const minPlotW = 560; // largeur min confortable
-    const plotW = Math.max(minPlotW, (points.length - 1) * stepPx + pad.l + pad.r);
+    const stepPx = 28;                    // espacement horizontal par point
+    const parentW = Math.max(280, Math.floor(parentEl.getBoundingClientRect().width || 280));
+    const neededPlotW = (points.length - 1) * stepPx + pad.l + pad.r;
+    const plotW = Math.max(parentW, neededPlotW);   // si plus grand -> overflow horizontal
     const plotH = 160;
 
     const scroller = document.createElement("div");
-    scroller.className = "w-full overflow-x-auto";
+    // styles inline pour garantir le scroll sur mobile
+    scroller.style.width = "100%";
+    scroller.style.maxWidth = "100%";
+    scroller.style.display = "block";
+    scroller.style.overflowX = "auto";
+    scroller.style.overflowY = "hidden";
+    scroller.style.WebkitOverflowScrolling = "touch";
+    scroller.style.touchAction = "pan-x";
     parentEl.appendChild(scroller);
 
     const canvas = document.createElement("canvas");
@@ -363,7 +356,9 @@ async function initApp() {
     canvas.height = Math.round(plotH * dpr);
     canvas.style.width  = plotW + "px";
     canvas.style.height = plotH + "px";
-    canvas.className = "block mb-3 rounded";
+    canvas.style.display = "block";
+    canvas.style.maxWidth = "none";  // IMPORTANT: ne pas se rétrécir
+    canvas.className = "mb-3 rounded";
     scroller.appendChild(canvas);
 
     const ctx = canvas.getContext("2d");
@@ -381,14 +376,13 @@ async function initApp() {
     ctx.lineWidth = 1;
     ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
     ctx.fillStyle = "#374151";
-
     for (let i = 0; i < levels.length; i++) {
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i);
       ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + w, y); ctx.stroke();
       ctx.fillText(labelByNorm[levels[i]] || levels[i], 8, y + 4);
     }
 
-    // ticks verticaux clairsemés
+    // ticks X
     const n = points.length;
     const step = n > 1 ? w / (n - 1) : w;
     const xTickEvery = Math.max(1, Math.floor(n / 10));
@@ -398,7 +392,7 @@ async function initApp() {
       ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + h); ctx.stroke();
     }
 
-    // dates/itérations sous l'axe
+    // labels X (dates / itérations)
     ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
     ctx.fillStyle = "#6b7280";
     for (let i = 0; i < n; i += xTickEvery) {
@@ -434,6 +428,9 @@ async function initApp() {
     ctx.strokeStyle = "#9ca3af";
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(pad.l, pad.t + h); ctx.lineTo(pad.l + w, pad.t + h); ctx.stroke();
+
+    // se placer tout à droite (le plus récent) s'il y a overflow
+    requestAnimationFrame(() => { scroller.scrollLeft = scroller.scrollWidth; });
   }
 
   function addDelayUI(wrapper, q) {
