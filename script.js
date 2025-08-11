@@ -299,103 +299,124 @@ async function initApp() {
     }
   }
 
-  // Mini chart Likert dans l'historique
+  // Remplace TOUTE ta fonction renderLikertChart par celle-ci
   function renderLikertChart(parentEl, history, normalize) {
-    // on prend max 30 points, ancien -> récent (gauche -> droite)
-    const MAX_POINTS = 30;
-    // on inverse les niveaux pour que "oui" soit en haut et "non" en bas
-    const levels = ["non", "plutot non", "moyen", "plutot oui", "oui"];
-    const labelByNorm = {
-      "non": "Non", "plutot non": "Plutôt non", "moyen": "Moyen",
-      "plutot oui": "Plutôt oui", "oui": "Oui"
+    // garde-fous
+    const hist = Array.isArray(history) ? history.slice() : [];
+    if (!hist.length) return;
+
+    // —— 1) Ordonner ancien -> récent (pour que le récent soit à DROITE)
+    // essaie d'abord une date JJ/MM/AAAA, sinon un N d'itération dans la clé, sinon l'ordre d'origine
+    const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+    const iterRe = /\b(\d+)\s*\(/; // "Badminton 12 (..."
+    const toKey = (e, idx) => {
+      if (e.date && dateRe.test(e.date)) {
+        const [, d, m, y] = e.date.match(dateRe);
+        return new Date(`${y}-${m}-${d}`).getTime();
+      }
+      if (e.key && dateRe.test(e.key)) {
+        const [, d, m, y] = e.key.match(dateRe);
+        return new Date(`${y}-${m}-${d}`).getTime();
+      }
+      if (e.key && iterRe.test(e.key)) {
+        return parseInt(e.key.match(iterRe)[1], 10); // itération
+      }
+      return idx; // fallback: ordre fourni
     };
 
-    const points = (history || [])
-      .slice(0, MAX_POINTS)           // récent->ancien fourni par backend → on coupe
-      .reverse()                     // puis on inverse pour ancien->récent
+    const ordered = hist
+      .map((e, i) => ({ e, k: toKey(e, i) }))
+      .sort((a, b) => a.k - b.k)  // ANCIEN -> RÉCENT
+      .map(x => x.e);
+
+    // fenêtre max
+    const MAX_POINTS = 60;                  // on peut en afficher plus qu'avant
+    const windowed = ordered.slice(-MAX_POINTS); // on garde les plus récents si trop long
+
+    // transformer en niveaux likert (0..4) – 0=non en bas, 4=oui en haut
+    const levels = ["non","plutot non","moyen","plutot oui","oui"];
+    const labelByNorm = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
+    const points = windowed
       .map(e => {
         const v = normalize(e.value);
         const idx = levels.indexOf(v);
-        return (idx === -1) ? null : { v, idx };
+        return (idx === -1) ? null : { v, idx, raw:e };
       })
       .filter(Boolean);
 
-    if (points.length < 2) return; // rien à tracer
+    if (points.length < 2) return;
 
-    // Canvas retina friendly
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = 560, cssH = 140;
-    const pad = { l: 70, r: 8, t: 10, b: 24 };
-    const w = cssW - pad.l - pad.r;
-    const h = cssH - pad.t - pad.b;
+    // —— 2) Scroller horizontal et largeur dynamique
+    const stepPx = 28; // espacement horizontal par point
+    const pad = { l: 70, r: 16, t: 10, b: 28 };
+    const minPlotW = 560; // largeur min confortable
+    const plotW = Math.max(minPlotW, (points.length - 1) * stepPx + pad.l + pad.r);
+    const plotH = 160;
+
+    const scroller = document.createElement("div");
+    scroller.className = "w-full overflow-x-auto";
+    parentEl.appendChild(scroller);
 
     const canvas = document.createElement("canvas");
-    canvas.width = cssW * dpr; canvas.height = cssH * dpr;
-    canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px";
-    canvas.className = "w-full block mb-3 rounded";
-    parentEl.appendChild(canvas);
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = Math.round(plotW * dpr);
+    canvas.height = Math.round(plotH * dpr);
+    canvas.style.width  = plotW + "px";
+    canvas.style.height = plotH + "px";
+    canvas.className = "block mb-3 rounded";
+    scroller.appendChild(canvas);
 
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
 
+    const w = plotW - pad.l - pad.r;
+    const h = plotH - pad.t - pad.b;
+
     // fond
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, cssW, cssH);
+    ctx.fillRect(0, 0, plotW, plotH);
 
-    // grille horizontale + labels Likert
-    ctx.strokeStyle = "#e5e7eb"; // gris clair
+    // grille + labels Y
+    ctx.strokeStyle = "#e5e7eb";
     ctx.lineWidth = 1;
     ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
-    ctx.fillStyle = "#374151"; // gris foncé pour labels
+    ctx.fillStyle = "#374151";
 
     for (let i = 0; i < levels.length; i++) {
-      // on inverse le calcul pour que le label "oui" (i=4) soit en haut
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i);
-      ctx.beginPath();
-      ctx.moveTo(pad.l, y);
-      ctx.lineTo(pad.l + w, y);
-      ctx.stroke();
-
-      // label à gauche
-      const lab = labelByNorm[levels[i]] || levels[i];
-      ctx.fillText(lab, 8, y + 4);
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + w, y); ctx.stroke();
+      ctx.fillText(labelByNorm[levels[i]] || levels[i], 8, y + 4);
     }
 
-    // grille verticale (ticks x)
+    // ticks verticaux clairsemés
     const n = points.length;
     const step = n > 1 ? w / (n - 1) : w;
-    const xTickEvery = Math.max(1, Math.floor(n / 6)); // ~6 ticks max
+    const xTickEvery = Math.max(1, Math.floor(n / 10));
     ctx.strokeStyle = "#f3f4f6";
     for (let i = 0; i < n; i += xTickEvery) {
       const x = pad.l + i * step;
-      ctx.beginPath();
-      ctx.moveTo(x, pad.t);
-      ctx.lineTo(x, pad.t + h);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + h); ctx.stroke();
     }
 
-    // labels de dates sous l'axe X
+    // dates/itérations sous l'axe
     ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
-    ctx.fillStyle = "#6b7280"; // gris pour les dates
+    ctx.fillStyle = "#6b7280";
     for (let i = 0; i < n; i += xTickEvery) {
       const x = pad.l + i * step;
-      const entryIdx = i; // correspond à l'index dans points
-      const histIdx = (history.length - points.length) + entryIdx;
-      const dateStr = history[histIdx]?.date || history[histIdx]?.key || "";
-      if (dateStr) {
-        // on formate la date ou l'itération
-        const formattedLabel = dateStr.includes('/') ? dateStr.substring(0, 5) : `N=${dateStr}`;
-        ctx.fillText(formattedLabel, x - 16, pad.t + h + 14); // petit offset
-      }
+      const e = points[i].raw;
+      let label = "";
+      if (e.date && dateRe.test(e.date)) label = e.date.slice(0,5);
+      else if (e.key && dateRe.test(e.key)) label = e.key.match(dateRe)[0].slice(0,5);
+      else if (e.key && iterRe.test(e.key)) label = "N=" + e.key.match(iterRe)[1];
+      ctx.fillText(label, x - 16, pad.t + h + 16);
     }
 
     // courbe
-    ctx.strokeStyle = "#2563eb"; // bleu
+    ctx.strokeStyle = "#2563eb";
     ctx.lineWidth = 2;
     ctx.beginPath();
     points.forEach((p, i) => {
       const x = pad.l + i * step;
-      // on inverse le calcul pour que "oui" (p.idx=4) soit en haut
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
@@ -405,20 +426,14 @@ async function initApp() {
     ctx.fillStyle = "#1f2937";
     points.forEach((p, i) => {
       const x = pad.l + i * step;
-      // on inverse le calcul pour que "oui" (p.idx=4) soit en haut
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
-      ctx.beginPath();
-      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
     });
 
-    // axe x (nominal, on laisse sans labels de dates pour rester compact)
+    // axe X
     ctx.strokeStyle = "#9ca3af";
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(pad.l, pad.t + h);
-    ctx.lineTo(pad.l + w, pad.t + h);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pad.l, pad.t + h); ctx.lineTo(pad.l + w, pad.t + h); ctx.stroke();
   }
 
   function addDelayUI(wrapper, q) {
@@ -441,7 +456,6 @@ async function initApp() {
     info.className = "text-xs text-gray-500";
     const infos = [];
     if (q.scheduleInfo?.nextDate) infos.push(`Prochaine : ${q.scheduleInfo.nextDate}`);
-    // ** MODIFICATION ICI **
     if (q.scheduleInfo?.remaining > 0) {
       infos.push(`Revient dans ${q.scheduleInfo.remaining} itération(s)`);
     }
