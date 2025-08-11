@@ -441,8 +441,11 @@ async function initApp() {
     info.className = "text-xs text-gray-500";
     const infos = [];
     if (q.scheduleInfo?.nextDate) infos.push(`Prochaine : ${q.scheduleInfo.nextDate}`);
-    if (q.scheduleInfo?.nextIter != null && q.scheduleInfo?.currentIter != null)
-      infos.push(`Prochaine itération : N=${q.scheduleInfo.nextIter}`);
+    // ** MODIFICATION ICI **
+    if (q.scheduleInfo?.remaining > 0) {
+      infos.push(`Revient dans ${q.scheduleInfo.remaining} itération(s)`);
+    }
+
     // réaffiche la valeur déjà choisie si existante
     if (window.__delayValues[key] != null) {
       const n = parseInt(window.__delayValues[key], 10);
