@@ -178,6 +178,14 @@ async function initApp() {
 
     // ⬅️ ajoute les délais choisis via le menu
     Object.assign(entries, window.__delayValues || {});
+    
+    // embarquer l'état SR par item
+    document.querySelectorAll("#daily-form [name]").forEach(inp => {
+      const id = inp.name;
+      if (window.__srToggles && window.__srToggles[id]) {
+        entries["__srToggle__" + id] = window.__srToggles[id]; // "on" | "off"
+      }
+    });
 
     const selected = dateSelect.selectedOptions[0];
     const mode = selected?.dataset.mode || "daily";
@@ -333,7 +341,7 @@ async function initApp() {
 
     // ---- Layout responsive + scrollable (mobile)
     const pad = { l: 70, r: 16, t: 10, b: 28 };
-    const stepPx = 28;                    // espacement horizontal par point
+    const stepPx = 28;             // espacement horizontal par point
     const parentW = Math.max(280, Math.floor(parentEl.getBoundingClientRect().width || 280));
     const neededPlotW = (points.length - 1) * stepPx + pad.l + pad.r;
     const plotW = Math.max(parentW, neededPlotW);   // si plus grand -> overflow horizontal
@@ -555,6 +563,34 @@ async function initApp() {
     });
     actions.appendChild(closeBtn);
 
+    // --- ÉTAT SR côté front (mémoire volatile) ---
+    window.__srToggles = window.__srToggles || {}; // clé: q.id -> "on"|"off"
+    // Affichage de l'état SR actuel (v. API doGet ci-dessous)
+    const srCurrent = q.scheduleInfo?.sr || { on:false };
+    if (!(q.id in window.__srToggles)) {
+      window.__srToggles[q.id] = srCurrent.on ? "on" : "off";
+    }
+    // Ligne SR
+    const srRow = document.createElement("div");
+    srRow.className = "border-t border-gray-100 p-2 flex items-center justify-between";
+    pop.appendChild(srRow);
+    const srLabel = document.createElement("span");
+    srLabel.className = "text-xs text-gray-700";
+    srLabel.innerHTML = `Répétition espacée : <strong>${window.__srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>` +
+      (srCurrent.on && srCurrent.interval ? ` <span class="text-gray-500">(${srCurrent.unit==="iters" ? srCurrent.interval+" itér." : srCurrent.due ? "due "+srCurrent.due : srCurrent.interval+" j"})</span>` : "");
+    srRow.appendChild(srLabel);
+    const srBtn = document.createElement("button");
+    srBtn.type = "button";
+    srBtn.className = "text-xs text-blue-600 hover:underline";
+    srBtn.textContent = window.__srToggles[q.id] === "on" ? "Désactiver SR" : "Activer SR";
+    srBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      window.__srToggles[q.id] = window.__srToggles[q.id] === "on" ? "off" : "on";
+      srBtn.textContent = window.__srToggles[q.id] === "on" ? "Désactiver SR" : "Activer SR";
+      srLabel.innerHTML = `Répétition espacée : <strong>${window.__srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>`;
+    });
+    srRow.appendChild(srBtn);
+
     // Toggle popover + gestion du click outside (attaché à l'ouverture)
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
@@ -700,6 +736,28 @@ async function initApp() {
         // Graphe Likert + 2 stats compactes (sur 30 dernières)
         renderLikertChart(historyBlock, q.history, normalize);
 
+        // --- Tri commun pour stats & liste : RÉCENT -> ANCIEN ---
+        const orderedForStats = (() => {
+          const hist = Array.isArray(q.history) ? q.history.slice() : [];
+          const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+          const iterRe = /\b(\d+)\s*\(/; // ex: "Badminton 12 (..)"
+          const toKey = (e, idx) => {
+            if (e.date && dateRe.test(e.date)) {
+              const [, d, m, y] = e.date.match(dateRe);
+              return new Date(`${y}-${m}-${d}`).getTime();
+            }
+            if (e.key && dateRe.test(e.key)) {
+              const [, d, m, y] = e.key.match(dateRe);
+              return new Date(`${y}-${m}-${d}`).getTime();
+            }
+            if (e.key && iterRe.test(e.key)) return parseInt(e.key.match(iterRe)[1], 10);
+            return idx; // fallback
+          };
+          // tri croissant puis on inverse pour avoir récent -> ancien
+          return hist.map((e,i)=>({e,k:toKey(e,i)})).sort((a,b)=>a.k-b.k).map(x=>x.e).reverse();
+        })();
+
+        // --- Stats compactes sur fenêtre récente ---
         const LIMIT = 10;
         const WINDOW = 30;
         const badge = (title, value, tone="blue") => {
@@ -708,7 +766,7 @@ async function initApp() {
             blue:"bg-blue-50 text-blue-700 border-blue-200",
             green:"bg-green-50 text-green-700 border-green-200",
             yellow:"bg-yellow-50 text-yellow-700 border-yellow-200",
-            red:"bg-red-50 text-red-700 border-red-200",
+            red:"bg-red-50 text-red-900 border-red-200",
             gray:"bg-gray-50 text-gray-700 border-gray-200",
             purple:"bg-purple-50 text-purple-700 border-purple-200"
           };
@@ -717,14 +775,18 @@ async function initApp() {
           return div;
         };
         const POSITIVE = new Set(["oui","plutot oui"]);
-        const windowHist = (q.history || []).slice(0, WINDOW);
 
+        // Fenêtre des N plus récents
+        const windowHist = orderedForStats.slice(0, WINDOW);
+
+        // Série courante (positifs consécutifs depuis le plus récent)
         let currentStreak = 0;
         for (const e of windowHist) {
           if (POSITIVE.has(normalize(e.value))) currentStreak++;
           else break;
         }
 
+        // Réponse la plus fréquente (dans la fenêtre)
         const counts = {};
         const order = ["non","plutot non","moyen","plutot oui","oui"];
         for (const e of windowHist) {
@@ -743,11 +805,19 @@ async function initApp() {
         if (best) statsWrap.appendChild(badge("Réponse la plus fréquente", pretty[best] || best, "purple"));
         historyBlock.appendChild(statsWrap);
 
-        // Liste (10 visibles) + bouton Afficher plus / Réduire
-        (q.history || []).forEach((entry, idx) => {
+        // --- Liste : utilise le même ordre trié (récent -> ancien) ---
+        orderedForStats.forEach((entry, idx) => {
           const key = entry.date || entry.key || "";
           const val = entry.value;
           const normalized = normalize(val);
+          const colorMap = {
+            "oui": "bg-green-100 text-green-800",
+            "plutot oui": "bg-green-50 text-green-700",
+            "moyen": "bg-yellow-100 text-yellow-800",
+            "plutot non": "bg-red-100 text-red-900",
+            "non": "bg-red-200 text-red-900",
+            "pas de reponse": "bg-gray-200 text-gray-700 italic"
+          };
           const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
 
           const entryDiv = document.createElement("div");
@@ -757,11 +827,11 @@ async function initApp() {
           historyBlock.appendChild(entryDiv);
         });
 
-        if (q.history && q.history.length > LIMIT) {
+        if (orderedForStats.length > LIMIT) {
           const moreBtn = document.createElement("button");
           moreBtn.type = "button";
           moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-          let expanded = false; const rest = q.history.length - LIMIT;
+          let expanded = false; const rest = orderedForStats.length - LIMIT;
           const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
           setLabel();
           moreBtn.addEventListener("click", () => {
