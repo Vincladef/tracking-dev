@@ -8,7 +8,7 @@ if (!user) {
 }
 
 // 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
-const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
+const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqmE1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOjEwtuierf_CcCI5hQ/exec";
 
 let apiUrl = null;
 
@@ -622,7 +622,7 @@ async function initApp() {
     container.innerHTML = "";
     console.log(`✍️ Rendu de ${questions.length} question(s)`);
 
-    const hiddenSR = []; // questions masquées (SR / délai)
+    const hiddenSR = []; // questions masquées par SR/delay
     const normalize = (str) =>
       (str || "")
       .normalize("NFD")
@@ -650,7 +650,7 @@ async function initApp() {
         console.log("-> Raison du masquage :", q.reason);
       }
       console.groupEnd();
-
+      
       if (q.skipped) {
         hiddenSR.push({
           id: q.id,
@@ -658,69 +658,69 @@ async function initApp() {
           reason: q.reason || "⏳ Répétition espacée.",
           info: q.scheduleInfo || {}
         });
-        return; // on n'affiche pas l'input
-      } else {
-        const wrapper = document.createElement("div");
-        wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
+        return; // on n'affiche rien ici
+      }
+      
+      const wrapper = document.createElement("div");
+      wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
 
-        const label = document.createElement("label");
-        label.className = "block text-lg font-semibold mb-2";
-        label.textContent = q.label;
-        wrapper.appendChild(label);
+      const label = document.createElement("label");
+      label.className = "block text-lg font-semibold mb-2";
+      label.textContent = q.label;
+      wrapper.appendChild(label);
 
-        // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
-        let referenceAnswer = "";
-        if (q.history && Array.isArray(q.history)) {
-          const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
-          if (dateISO) {
-            const entry = q.history.find(entry => {
-              if (entry?.date) {
-                const [dd, mm, yyyy] = entry.date.split("/");
-                const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-                return entryDateISO === dateISO;
-              }
-              return false;
-            });
-            referenceAnswer = entry?.value || "";
-          }
-        }
-        let input;
-        const type = (q.type || "").toLowerCase();
-
-        if (type.includes("oui")) {
-          input = document.createElement("div");
-          input.className = "space-x-6 text-gray-700";
-          input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-            <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
-        } else if (type.includes("menu") || type.includes("likert")) {
-          input = document.createElement("select");
-          input.name = q.id;
-          input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-          ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
-            const option = document.createElement("option");
-            option.value = opt;
-            option.textContent = opt;
-            if (opt === referenceAnswer) option.selected = true;
-            input.appendChild(option);
+      // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
+      let referenceAnswer = "";
+      if (q.history && Array.isArray(q.history)) {
+        const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
+        if (dateISO) {
+          const entry = q.history.find(entry => {
+            if (entry?.date) {
+              const [dd, mm, yyyy] = entry.date.split("/");
+              const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+              return entryDateISO === dateISO;
+            }
+            return false;
           });
-        } else if (type.includes("plus long")) {
-          input = document.createElement("textarea");
-          input.name = q.id;
-          input.rows = 4;
-          input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-          input.value = referenceAnswer;
-        } else {
-          input = document.createElement("input");
-          input.name = q.id;
-          input.type = "text";
-          input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-          input.value = referenceAnswer;
+          referenceAnswer = entry?.value || "";
         }
+      }
+      let input;
+      const type = (q.type || "").toLowerCase();
 
-        wrapper.appendChild(input);
-        addDelayUI(wrapper, q); // Appel du nouveau helper ici
+      if (type.includes("oui")) {
+        input = document.createElement("div");
+        input.className = "space-x-6 text-gray-700";
+        input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
+          <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
+      } else if (type.includes("menu") || type.includes("likert")) {
+        input = document.createElement("select");
+        input.name = q.id;
+        input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+        ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
+          const option = document.createElement("option");
+          option.value = opt;
+          option.textContent = opt;
+          if (opt === referenceAnswer) option.selected = true;
+          input.appendChild(option);
+        });
+      } else if (type.includes("plus long")) {
+        input = document.createElement("textarea");
+        input.name = q.id;
+        input.rows = 4;
+        input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+        input.value = referenceAnswer;
+      } else {
+        input = document.createElement("input");
+        input.name = q.id;
+        input.type = "text";
+        input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+        input.value = referenceAnswer;
       }
 
+      wrapper.appendChild(input);
+      addDelayUI(wrapper, q); // Appel du nouveau helper ici
+    
       // 📓 Historique (compatible daily et practice)
       if (q.history && q.history.length > 0) {
         console.log(`📖 Affichage de l'historique pour "${q.label}" (${q.history.length} entrées)`);
@@ -809,14 +809,6 @@ async function initApp() {
           const key = entry.date || entry.key || "";
           const val = entry.value;
           const normalized = normalize(val);
-          const colorMap = {
-            "oui": "bg-green-100 text-green-800",
-            "plutot oui": "bg-green-50 text-green-700",
-            "moyen": "bg-yellow-100 text-yellow-800",
-            "plutot non": "bg-red-100 text-red-900",
-            "non": "bg-red-200 text-red-900",
-            "pas de reponse": "bg-gray-200 text-gray-700 italic"
-          };
           const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
 
           const entryDiv = document.createElement("div");
@@ -859,7 +851,7 @@ async function initApp() {
 
       const details = document.createElement("details");
       details.className = "bg-gray-50 border border-gray-200 rounded-lg";
-      if (hiddenSR.length > 3) details.open = false;
+      if (hiddenSR.length <= 3) details.open = true;
 
       const summary = document.createElement("summary");
       summary.className = "cursor-pointer select-none px-4 py-2 font-medium text-gray-800 flex items-center justify-between";
@@ -885,7 +877,7 @@ async function initApp() {
 
       const note = document.createElement("p");
       note.className = "mt-2 text-xs text-gray-500";
-      note.textContent = "Ces items sont masqués automatiquement car vos réponses précédentes étaient positives. Ils réapparaîtront à l’échéance.";
+      note.textContent = "Ces items sont masqués automatiquement suite à vos réponses positives. Ils réapparaîtront à l’échéance.";
       list.appendChild(note);
 
       details.appendChild(list);
