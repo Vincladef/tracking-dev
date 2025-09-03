@@ -8,7 +8,7 @@ if (!user) {
 }
 
 // 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
-const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
+const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqmE1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOjEwtuierf_CcCI5hQ/exec";
 
 let apiUrl = null;
 
@@ -622,6 +622,7 @@ async function initApp() {
     container.innerHTML = "";
     console.log(`✍️ Rendu de ${questions.length} question(s)`);
 
+    const hiddenSR = []; // questions masquées (SR / délai)
     const normalize = (str) =>
       (str || "")
       .normalize("NFD")
@@ -650,41 +651,39 @@ async function initApp() {
       }
       console.groupEnd();
 
-      const wrapper = document.createElement("div");
-      wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
-
-      const label = document.createElement("label");
-      label.className = "block text-lg font-semibold mb-2";
-      label.textContent = q.skipped ? `🎉 ${q.label}` : q.label;
-      wrapper.appendChild(label);
-
-      // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
-      let referenceAnswer = "";
-      if (q.history && Array.isArray(q.history)) {
-        const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
-        if (dateISO) {
-          const entry = q.history.find(entry => {
-            if (entry?.date) {
-              const [dd, mm, yyyy] = entry.date.split("/");
-              const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-              return entryDateISO === dateISO;
-            }
-            return false;
-          });
-          referenceAnswer = entry?.value || "";
-        }
-      }
-
       if (q.skipped) {
-        wrapper.classList.add("bg-green-50", "border", "border-green-200", "opacity-70");
-
-        const reason = document.createElement("p");
-        reason.className = "text-sm italic text-green-700 mb-2";
-        reason.textContent = q.reason || "⏳ Cette question est temporairement masquée.";
-        wrapper.appendChild(reason);
-
-        // Pas d'input caché ici, on gère les questions masquées côté back
+        hiddenSR.push({
+          id: q.id,
+          label: q.label,
+          reason: q.reason || "⏳ Répétition espacée.",
+          info: q.scheduleInfo || {}
+        });
+        return; // on n'affiche pas l'input
       } else {
+        const wrapper = document.createElement("div");
+        wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
+
+        const label = document.createElement("label");
+        label.className = "block text-lg font-semibold mb-2";
+        label.textContent = q.label;
+        wrapper.appendChild(label);
+
+        // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
+        let referenceAnswer = "";
+        if (q.history && Array.isArray(q.history)) {
+          const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
+          if (dateISO) {
+            const entry = q.history.find(entry => {
+              if (entry?.date) {
+                const [dd, mm, yyyy] = entry.date.split("/");
+                const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+                return entryDateISO === dateISO;
+              }
+              return false;
+            });
+            referenceAnswer = entry?.value || "";
+          }
+        }
         let input;
         const type = (q.type || "").toLowerCase();
 
@@ -853,6 +852,46 @@ async function initApp() {
       container.appendChild(wrapper);
     });
 
+    // === Panneau "Questions masquées (SR)" ===
+    if (hiddenSR.length) {
+      const panel = document.createElement("div");
+      panel.className = "mt-6";
+
+      const details = document.createElement("details");
+      details.className = "bg-gray-50 border border-gray-200 rounded-lg";
+      if (hiddenSR.length > 3) details.open = false;
+
+      const summary = document.createElement("summary");
+      summary.className = "cursor-pointer select-none px-4 py-2 font-medium text-gray-800 flex items-center justify-between";
+      summary.innerHTML = `
+        <span>🔕 ${hiddenSR.length} question(s) masquée(s) — répétition espacée</span>
+        <span class="text-sm text-gray-500">voir</span>
+      `;
+      details.appendChild(summary);
+
+      const list = document.createElement("div");
+      list.className = "px-4 pt-2 pb-3";
+
+      hiddenSR.forEach(item => {
+        const row = document.createElement("div");
+        row.className = "mb-2 px-3 py-2 rounded bg-white border border-gray-200";
+        const extras = [];
+        if (item.info?.nextDate) extras.push(`Prochaine : ${item.info.nextDate}`);
+        if (Number(item.info?.remaining) > 0) extras.push(`Restant : ${item.info.remaining} itér.`);
+        const tail = extras.length ? ` <span class="text-gray-500">(${extras.join(" — ")})</span>` : "";
+        row.innerHTML = `<strong>${item.label}</strong><br><span class="text-gray-700">${item.reason}</span>${tail}`;
+        list.appendChild(row);
+      });
+
+      const note = document.createElement("p");
+      note.className = "mt-2 text-xs text-gray-500";
+      note.textContent = "Ces items sont masqués automatiquement car vos réponses précédentes étaient positives. Ils réapparaîtront à l’échéance.";
+      list.appendChild(note);
+
+      details.appendChild(list);
+      panel.appendChild(details);
+      container.appendChild(panel);
+    }
     showFormUI();
     console.log("✅ Rendu des questions terminé.");
   }
