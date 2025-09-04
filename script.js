@@ -67,6 +67,10 @@ async function initApp() {
   // ✅ Mémoire des délais sélectionnés (clé -> valeur)
   window.__delayValues = window.__delayValues || {};
 
+  // états SR en mémoire
+  window.__srToggles  = window.__srToggles || {}; // état courant (on/off) tel que l’UI l’affiche
+  window.__srBaseline = window.__srBaseline || {}; // état de référence venu du backend (pour ne POSTer que les différences)
+
   // Titre dynamique
   document.getElementById("user-title").textContent =
     `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
@@ -154,6 +158,8 @@ async function initApp() {
   function handleSelectChange() {
     // on repart propre à chaque changement
     if (window.__delayValues) window.__delayValues = {};
+    if (window.__srToggles)   window.__srToggles   = {};
+    if (window.__srBaseline)  window.__srBaseline  = {};
 
     const sel = document.getElementById("date-select");
     if (!sel || !sel.selectedOptions.length) return;
@@ -179,13 +185,15 @@ async function initApp() {
     // ⬅️ ajoute les délais choisis via le menu
     Object.assign(entries, window.__delayValues || {});
     
-    // embarquer l'état SR par item
-    document.querySelectorAll("#daily-form [name]").forEach(inp => {
-      const id = inp.name;
-      if (window.__srToggles && window.__srToggles[id]) {
-        entries["__srToggle__" + id] = window.__srToggles[id]; // "on" | "off"
+    // embarquer l'état SR pour TOUTES les questions (visibles + masquées),
+    // mais seulement si l'utilisateur a modifié l'état par rapport au backend
+    if (window.__srToggles && window.__srBaseline) {
+      for (const [id, onOff] of Object.entries(window.__srToggles)) {
+        if (window.__srBaseline[id] !== onOff) {
+          entries["__srToggle__" + id] = onOff; // "on" | "off"
+        }
       }
-    });
+    }
 
     const selected = dateSelect.selectedOptions[0];
     const mode = selected?.dataset.mode || "daily";
@@ -231,6 +239,9 @@ async function initApp() {
 
         // on peut vider les délais mémorisés pour repartir propre
         if (window.__delayValues) window.__delayValues = {};
+        // on repart propre aussi pour SR
+        window.__srToggles  = {};
+        window.__srBaseline = {};
 
         setTimeout(() => {
           if (mode === "practice") {
@@ -499,13 +510,13 @@ async function initApp() {
           { label: "1 mois (~30 j)", value: 30 }
         ]
       : [
-          { label: "0", value: 0 },
           { label: "1", value: 1 },
           { label: "2", value: 2 },
           { label: "3", value: 3 },
           { label: "5", value: 5 },
           { label: "8", value: 8 },
-          { label: "13", value: 13 }
+          { label: "13", value: 13 },
+          { label: "21", value: 21 }
         ];
 
     const grid = document.createElement("div");
@@ -567,6 +578,9 @@ async function initApp() {
     window.__srToggles = window.__srToggles || {}; // clé: q.id -> "on"|"off"
     // Affichage de l'état SR actuel (v. API doGet ci-dessous)
     const srCurrent = q.scheduleInfo?.sr || { on:false };
+    if (!(q.id in window.__srBaseline)) {
+      window.__srBaseline[q.id] = srCurrent.on ? "on" : "off";
+    }
     if (!(q.id in window.__srToggles)) {
       window.__srToggles[q.id] = srCurrent.on ? "on" : "off";
     }
@@ -595,23 +609,33 @@ async function initApp() {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
 
-      // Ferme les autres popovers ouverts
+      // Ferme les autres popovers
       document.querySelectorAll('[data-pop="delay"]').forEach(el => {
-        if (el !== pop) el.classList.add("hidden");
+        if (el !== pop) {
+          el.classList.add("hidden");
+          if (el._onOutside) {
+            document.removeEventListener("click", el._onOutside);
+            el._onOutside = null;
+          }
+        }
       });
 
+      const wasHidden = pop.classList.contains("hidden");
       pop.classList.toggle("hidden");
 
-      const onOutside = (e) => {
-        if (!pop.contains(e.target) && e.target !== btn) {
-          pop.classList.add("hidden");
-          document.removeEventListener("click", onOutside);
-        }
-      };
-
-      // n'attache le listener global que si on vient d'ouvrir
-      if (!pop.classList.contains("hidden")) {
-        setTimeout(() => document.addEventListener("click", onOutside), 0);
+      // si on vient d'ouvrir → poser l'écouteur; si on vient de fermer → l'enlever
+      if (wasHidden) {
+        pop._onOutside = (e) => {
+          if (!pop.contains(e.target) && e.target !== btn) {
+            pop.classList.add("hidden");
+            document.removeEventListener("click", pop._onOutside);
+            pop._onOutside = null;
+          }
+        };
+        setTimeout(() => document.addEventListener("click", pop._onOutside), 0);
+      } else if (pop._onOutside) {
+        document.removeEventListener("click", pop._onOutside);
+        pop._onOutside = null;
       }
     });
   }
