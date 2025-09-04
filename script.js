@@ -652,13 +652,9 @@ async function initApp() {
       console.groupEnd();
       
       if (q.skipped) {
-        hiddenSR.push({
-          id: q.id,
-          label: q.label,
-          reason: q.reason || "⏳ Répétition espacée.",
-          info: q.scheduleInfo || {}
-        });
-        return; // on n'affiche rien ici
+        // on garde tout (history, scheduleInfo…) pour pouvoir afficher délai + historique
+        hiddenSR.push(q);
+        return;
       }
       
       const wrapper = document.createElement("div");
@@ -851,7 +847,7 @@ async function initApp() {
 
       const details = document.createElement("details");
       details.className = "bg-gray-50 border border-gray-200 rounded-lg";
-      if (hiddenSR.length <= 3) details.open = true;
+      details.open = false; // toujours replié par défaut
 
       const summary = document.createElement("summary");
       summary.className = "cursor-pointer select-none px-4 py-2 font-medium text-gray-800 flex items-center justify-between";
@@ -864,14 +860,135 @@ async function initApp() {
       const list = document.createElement("div");
       list.className = "px-4 pt-2 pb-3";
 
+      const normalize = (str) =>
+        (str || "")
+          .normalize("NFD").replace(/[̀-ͯ]/g, "")
+          .replace(/[\u00A0\u202F\u200B]/g, " ")
+          .replace(/\s+/g, " ")
+          .toLowerCase()
+          .trim();
+
       hiddenSR.forEach(item => {
         const row = document.createElement("div");
-        row.className = "mb-2 px-3 py-2 rounded bg-white border border-gray-200";
+        row.className = "mb-2 rounded bg-white border border-gray-200";
+
+        // en-tête de l'item
+        const head = document.createElement("div");
+        head.className = "px-3 py-2 flex items-center justify-between";
+        const title = document.createElement("div");
+        title.innerHTML = `<strong>${item.label}</strong>`;
+        const seeBtn = document.createElement("button");
+        seeBtn.type = "button";
+        seeBtn.className = "text-sm text-blue-600 hover:underline";
+        seeBtn.textContent = "voir";
+        head.appendChild(title);
+        head.appendChild(seeBtn);
+
+        // infos "prochaine échéance"
+        const sub = document.createElement("div");
+        sub.className = "px-3 pb-2 text-sm text-gray-700 flex items-center gap-2";
         const extras = [];
-        if (item.info?.nextDate) extras.push(`Prochaine : ${item.info.nextDate}`);
-        if (Number(item.info?.remaining) > 0) extras.push(`Restant : ${item.info.remaining} itér.`);
-        const tail = extras.length ? ` <span class="text-gray-500">(${extras.join(" — ")})</span>` : "";
-        row.innerHTML = `<strong>${item.label}</strong><br><span class="text-gray-700">${item.reason}</span>${tail}`;
+        if (item.scheduleInfo?.nextDate) extras.push(`Prochaine : ${item.scheduleInfo.nextDate}`);
+        if (Number(item.scheduleInfo?.remaining) > 0) extras.push(`Restant : ${item.scheduleInfo.remaining} itér.`);
+        const tail = extras.length ? ` (${extras.join(" — ")})` : "";
+        sub.innerHTML = `⏱️ ${
+          item.reason || "Répétition espacée"
+        }${tail}`;
+
+        // contenu détaillé replié
+        const content = document.createElement("div");
+        content.className = "px-3 pb-3 hidden";
+
+        // 1) UI Délai (mêmes options que pour les visibles)
+        const delayWrap = document.createElement("div");
+        addDelayUI(delayWrap, item);
+        content.appendChild(delayWrap);
+
+        // 2) Historique (même principe : bouton + bloc avec graphe + liste)
+        if (item.history && item.history.length > 0) {
+          const toggleBtn = document.createElement("button");
+          toggleBtn.type = "button";
+          toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
+          toggleBtn.textContent = "📓 Voir l’historique des réponses";
+
+          const historyBlock = document.createElement("div");
+          historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
+
+          // graphe likert
+          renderLikertChart(historyBlock, item.history, normalize);
+
+          // liste (récents -> anciens)
+          const ordered = (() => {
+            const hist = Array.isArray(item.history) ? item.history.slice() : [];
+            const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+            const iterRe = /\b(\d+)\s*\(/;
+            const toKey = (e, idx) => {
+              if (e.date && dateRe.test(e.date)) {
+                const [, d, m, y] = e.date.match(dateRe);
+                return new Date(`${y}-${m}-${d}`).getTime();
+              }
+              if (e.key && dateRe.test(e.key)) {
+                const [, d, m, y] = e.key.match(dateRe);
+                return new Date(`${y}-${m}-${d}`).getTime();
+              }
+              if (e.key && iterRe.test(e.key)) return parseInt(e.key.match(iterRe)[1], 10);
+              return idx;
+            };
+            return hist.map((e,i)=>({e,k:toKey(e,i)})).sort((a,b)=>a.k-b.k).map(x=>x.e).reverse();
+          })();
+
+          const colorMap = {
+            "oui": "bg-green-100 text-green-800",
+            "plutot oui": "bg-green-50 text-green-700",
+            "moyen": "bg-yellow-100 text-yellow-800",
+            "plutot non": "bg-red-100 text-red-900",
+            "non": "bg-red-200 text-red-900",
+            "pas de reponse": "bg-gray-200 text-gray-700 italic"
+          };
+
+          const LIMIT = 10;
+          ordered.forEach((entry, idx) => {
+            const key = entry.date || entry.key || "";
+            const val = entry.value;
+            const normalized = normalize(val);
+            const div = document.createElement("div");
+            div.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
+            if (idx >= LIMIT) div.classList.add("hidden", "extra-history");
+            div.innerHTML = `<strong>${key}</strong> – ${val}`;
+            historyBlock.appendChild(div);
+          });
+
+          if (ordered.length > LIMIT) {
+            const moreBtn = document.createElement("button");
+            moreBtn.type = "button";
+            moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
+            let expanded = false; const rest = ordered.length - LIMIT;
+            const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
+            setLabel();
+            moreBtn.addEventListener("click", () => {
+              expanded = !expanded;
+              historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
+              setLabel();
+            });
+            historyBlock.appendChild(moreBtn);
+          }
+
+          toggleBtn.addEventListener("click", () => {
+            historyBlock.classList.toggle("hidden");
+          });
+
+          content.appendChild(toggleBtn);
+          content.appendChild(historyBlock);
+        }
+
+        // toggle du volet de l'item
+        seeBtn.addEventListener("click", () => {
+          content.classList.toggle("hidden");
+        });
+
+        row.appendChild(head);
+        row.appendChild(sub);
+        row.appendChild(content);
         list.appendChild(row);
       });
 
