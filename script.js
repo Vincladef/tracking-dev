@@ -172,6 +172,15 @@ async function initApp() {
       .map(x=>x.e);
   }
 
+  function prettyKeyWithDate(entry) {
+    const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+    const fullDate = (entry.date && dateRe.test(entry.date))
+      ? entry.date
+      : (entry.key && dateRe.test(entry.key) ? entry.key.match(dateRe)[0] : "");
+    const title = entry.date ? (entry.key || entry.date) : (entry.key || "");
+    return fullDate ? `${title} (${fullDate})` : title;
+  }
+
   await buildCombinedSelect();
 
   // État initial
@@ -374,13 +383,20 @@ async function initApp() {
     // --- Mapping Likert
     const levels = ["non","plutot non","moyen","plutot oui","oui"];
     const pretty  = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
+    const pickDate = (e) => {
+      const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+      if (e.date && dateRe.test(e.date)) return e.date;
+      if (e.key  && dateRe.test(e.key))  return e.key.match(dateRe)[0];
+      return "";
+    };
     const points = ordered.map(e => {
       const v = normalize(e.value);
       const idx = levels.indexOf(v);
       if (idx === -1) return null;
-      // clef d’affichage (date > header > itération)
-      let label = e.date || (e.key && (e.key.match(dateRe)?.[0] || e.key)) || "";
-      return { idx, v, label, raw: e };
+      const fullDate = pickDate(e);
+      const shortDate = fullDate ? fullDate.slice(0,5) : "";
+      const fallback = e.date || e.key || "";
+      return { idx, v, label: shortDate || fallback.slice(0,5), fullLabel: fullDate || fallback, raw: e };
     }).filter(Boolean);
     if (points.length < 2) return;
 
@@ -413,6 +429,12 @@ async function initApp() {
     canvas.style.display = "block";
     canvas.style.borderRadius = "10px";
     scroller.appendChild(canvas);
+    // scroll au plus récent (droite) avec double rAF
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scroller.scrollLeft = scroller.scrollWidth;
+      });
+    });
 
     // petit tooltip
     const tip = document.createElement("div");
@@ -466,6 +488,8 @@ async function initApp() {
     grad.addColorStop(1,  "#7c3aed"); // violet
     ctx.strokeStyle = grad;
     ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
     ctx.beginPath();
     points.forEach((p, i) => {
       const x = pad.l + i * step;
@@ -494,7 +518,7 @@ async function initApp() {
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(pad.l, pad.t + h); ctx.lineTo(pad.l + w, pad.t + h); ctx.stroke();
 
-    // --- scroll au plus récent (droite) si overflow
+    // --- scroll au plus récent (droite) si overflow (conservé)
     requestAnimationFrame(() => { scroller.scrollLeft = scroller.scrollWidth; });
 
     // --- tooltip simple
@@ -512,7 +536,7 @@ async function initApp() {
       if (best && bestD < 18) {
         tip.style.left = Math.round(best.x) + "px";
         tip.style.top  = Math.round(best.y) + "px";
-        tip.innerHTML = `${best.p.label || ""} · <b>${pretty[best.p.v] || best.p.v}</b>`;
+        tip.innerHTML = `${best.p.fullLabel || ""} · <b>${pretty[best.p.v] || best.p.v}</b>`;
         tip.style.opacity = "1";
       } else {
         tip.style.opacity = "0";
@@ -878,7 +902,7 @@ async function initApp() {
 
         // --- Liste : utilise le même ordre trié (récent -> ancien) ---
         orderedForStats.forEach((entry, idx) => {
-          const key = entry.date || entry.key || "";
+          const keyPretty = prettyKeyWithDate(entry);
           const val = entry.value;
           const normalized = normalize(val);
           const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
@@ -886,7 +910,7 @@ async function initApp() {
           const entryDiv = document.createElement("div");
           entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
           if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history");
-          entryDiv.innerHTML = `<strong>${key}</strong> – ${val}`;
+          entryDiv.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
           historyBlock.appendChild(entryDiv);
         });
 
@@ -1007,13 +1031,13 @@ async function initApp() {
 
           const LIMIT = 10;
           ordered.forEach((entry, idx) => {
-            const key = entry.date || entry.key || "";
+            const keyPretty = prettyKeyWithDate(entry);
             const val = entry.value;
             const normalized = normalize(val);
             const div = document.createElement("div");
             div.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
             if (idx >= LIMIT) div.classList.add("hidden", "extra-history");
-            div.innerHTML = `<strong>${key}</strong> – ${val}`;
+            div.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
             historyBlock.appendChild(div);
           });
 
