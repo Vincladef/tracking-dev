@@ -1071,7 +1071,9 @@ async function initApp() {
           }
 
           toggleBtn.addEventListener("click", () => {
+            const wasHidden = historyBlock.classList.contains("hidden");
             historyBlock.classList.toggle("hidden");
+            if (wasHidden) scrollToRight(historyBlock._likertScroller);
           });
 
           content.appendChild(toggleBtn);
