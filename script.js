@@ -326,18 +326,36 @@ async function initApp() {
     // --- Ordre: ancien -> récent (récent à DROITE)
     const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
     const iterRe = /\b(\d+)\s*\(/; // "Catégorie 12 (...)"
+    // On retourne une clé ET un "type" pour savoir comment trier
     const toKey = (e, idx) => {
-      if (Number.isFinite(e.colIndex)) return e.colIndex;             // le plus fiable
+      if (Number.isFinite(e.colIndex)) {
+        return { k: e.colIndex, kind: "col" };          // plus petit => plus récent
+      }
       if (e.date && dateRe.test(e.date)) {
-        const [, d, m, y] = e.date.match(dateRe); return new Date(`${y}-${m}-${d}`).getTime();
+        const [, d, m, y] = e.date.match(dateRe);
+        return { k: new Date(`${y}-${m}-${d}`).getTime(), kind: "time" };
       }
       if (e.key && dateRe.test(e.key)) {
-        const [, d, m, y] = e.key.match(dateRe); return new Date(`${y}-${m}-${d}`).getTime();
+        const [, d, m, y] = e.key.match(dateRe);
+        return { k: new Date(`${y}-${m}-${d}`).getTime(), kind: "time" };
       }
-      if (e.key && iterRe.test(e.key)) return parseInt(e.key.match(iterRe)[1], 10);
-      return idx;
+      if (e.key && iterRe.test(e.key)) {
+        return { k: parseInt(e.key.match(iterRe)[1], 10), kind: "iter" }; // plus grand => plus récent
+      }
+      return { k: idx, kind: "idx" };
     };
-    const ordered = hist.map((e,i)=>({e,k:toKey(e,i)})).sort((a,b)=>a.k-b.k).map(x=>x.e);
+    // ATTENTION au sens du tri :
+    // - colIndex : plus grand = plus ancien  -> tri DESC pour mettre l'ancien à gauche
+    // - time/iter : plus petit = plus ancien -> tri ASC
+    const ordered = hist
+      .map((e, i) => ({ e, key: toKey(e, i) }))
+      .sort((a, b) => {
+        if (a.key.kind === "col" && b.key.kind === "col") {
+          return b.key.k - a.key.k; // DESC -> ancien à gauche
+        }
+        return a.key.k - b.key.k;   // ASC  -> ancien à gauche
+      })
+      .map(x => x.e);
 
     // --- Mapping Likert
     const levels = ["non","plutot non","moyen","plutot oui","oui"];
