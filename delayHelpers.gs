@@ -223,7 +223,7 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
         obj[k] = v;
       });
       if (obj.ef) obj.ef = Number(obj.ef);
-      if (obj.n) obj.n = parseInt(String(obj.n), 10);
+      if (obj.n != null) obj.n = parseFloat(String(obj.n));
       if (obj.interval) obj.interval = parseInt(String(obj.interval), 10);
       return obj;
     }
@@ -245,8 +245,8 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
   const info = {
     on: (typeof prev.on === 'boolean') ? prev.on : false, // garde l’état, défaut OFF
     unit: unitOpt || prev.unit || 'days',                // garde l’unité si connue
-    n: 0,
-    interval: 1
+    n: 0.0,
+    interval: 0
   };
   // on purge les champs SM-2 s’ils existaient
   // (ne pas passer ef/due => _writeSRTag ne les écrira pas)
@@ -292,89 +292,96 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
   let interval = _fib(n + (shift || 0));
   if (Number.isFinite(cap)) interval = Math.min(interval, cap);
   return { n, interval };
-}/** SR "streak Fibonacci" : Oui/Plutôt oui = +1, Moyen/Non = reset */function applySRAfterAnswer(responseRange, anchorCol, baseDateISO_or_Category, mode, answerValue) {
+}/**
+ * SR "demi-point"
+ * - Oui           -> +1.0 au streak
+ * - Plutôt oui    -> +0.5 au streak
+ * - Moyen / Non…  -> reset (streak = 0)
+ * Intervalle = floor(streak)
+ * - daily    -> due = baseDate + interval jours
+ * - practice -> remain = interval itérations
+ */function applySRAfterAnswer(responseRange, anchorCol, baseDateISO_or_Category, mode, answerValue) {
   const sheet  = responseRange.getSheet();
   const row    = responseRange.getRow();
   const anchor = sheet.getRange(row, anchorCol);
 
-  const sr = getSRInfo(anchor);
-  if (!sr.on) return null;
+  const srPrev = getSRInfo(anchor);                  // { on, unit?, n?, interval? ... } | { on:false }
+  if (!srPrev.on) return null;                       // SR OFF => ne rien faire
 
-  // --- MIGRATION SR : si ancien SM-2 (ef) ou valeurs incohérentes → repartir proprement
-  let prevN   = Number(sr.n || 0);                           // ← let (on va le réutiliser)
-  const legacy  = typeof sr.ef === 'number';
-  const tooHigh = prevN > 8 || (Number(sr.interval || 0) > (mode === "daily" ? 34 : 21));
-  if (legacy || tooHigh) {
-    sr.n = 0;
-    sr.interval = 1;
-    delete sr.ef;
-    delete sr.due;
-    _writeSRTag(anchor, sr);  // ← conserve l’état ON/OFF existant (ne force pas ON)
-    prevN = 0;                // ← on repart proprement
-  }
+  // Lire la réponse sous forme Likert 0..4
+  const likert = normalizeLikert(answerValue);       // 0..4 ou null
+  if (likert == null) return null;                   // pas de likert => on touche pas au SR
 
-  const likert = normalizeLikert(answerValue);
-  if (likert == null) return null;           // pas de likert -> pas de SR auto
+  // Streak actuel (peut être décimal)
+  let streak = Number(srPrev.n || 0);
+  if (!Number.isFinite(streak) || streak < 0) streak = 0;
 
-  // Succès uniquement si "Plutôt oui" (3) ou "Oui" (4)
-  const success = (likert >= 3);
+  // Règle demi-point
+  let successDelta = 0;
+  if (likert >= 4) successDelta = 1.0;              // Oui
+  else if (likert === 3) successDelta = 0.5;        // Plutôt oui
+  else successDelta = -Infinity;                    // reset
 
-  // Réglages : plafonds & vitesse
-  const MAX_DAYS  = 34;   // plafonne les jours (daily)
-  const MAX_ITERS = 21;   // plafonne les itérations (practice)
-  const SHIFT     = 1;    // 0 => 1,1,2,3,5 ; 1 => 1,2,3,5,8 (recommandé)
-
-  const cap   = (mode === "daily") ? MAX_DAYS : MAX_ITERS;
-  const next  = _nextFibStreak(prevN, success, cap, SHIFT);
-  if (!success) {
-    next.interval = 0; // réapparition immédiate (daily & practice)
-  }
-
-  if (mode === "daily" && next.interval === 0) {
+  if (successDelta < 0) {
+    // Reset : réapparition immédiate
+    streak = 0;
     _clearDelayFrom(responseRange);
     _clearDelayFrom(anchor);
-    sr.on = true; sr.unit = "days"; sr.n = next.n; sr.interval = 0;
-    delete sr.due; delete sr.ef;
+    const sr = { on: true, unit: (mode === "daily" ? "days" : "iters"), n: streak, interval: 0 };
     _writeSRTag(anchor, sr);
-    return { unit:"days", dueISO: null, interval: 0, n: next.n };
+    return (mode === "daily")
+      ? { unit: "days", dueISO: null, interval: 0, n: streak }
+      : { unit: "iters", remain: 0,        interval: 0, n: streak };
   }
 
-  if (mode === "practice" && next.interval === 0) {
+  // Succès : on incrémente le streak
+  streak += successDelta;
+
+  // Intervalle entier = floor(streak)
+  let interval = Math.floor(streak);
+
+  // (Optionnel) plafonds si tu veux en garder un
+  const MAX_DAYS  = 34;   // daily
+  const MAX_ITERS = 21;   // practice
+  if (mode === "daily")   interval = Math.min(interval, MAX_DAYS);
+  if (mode === "practice")interval = Math.min(interval, MAX_ITERS);
+
+  // Aucun délai si interval = 0
+  if (interval <= 0) {
     _clearDelayFrom(responseRange);
     _clearDelayFrom(anchor);
-    sr.on = true; sr.unit = "iters"; sr.n = next.n; sr.interval = 0;
-    delete sr.due; delete sr.ef;
+    const sr = { on: true, unit: (mode === "daily" ? "days" : "iters"), n: streak, interval: 0 };
     _writeSRTag(anchor, sr);
-    return { unit:"iters", remain: 0, n: next.n };
+    return (mode === "daily")
+      ? { unit: "days", dueISO: null, interval: 0, n: streak }
+      : { unit: "iters", remain: 0,        interval: 0, n: streak };
   }
 
+  // Poser le délai selon le mode
   if (mode === "daily") {
     const base   = _parseISO(String(baseDateISO_or_Category)); // YYYY-MM-DD
-    const due    = _addDays(base, next.interval);
+    const due    = _addDays(base, interval);
     const dueISO = _toISO(due);
     const human  = `⏱️ Reviens le ${_formatFR(due)}`;
 
-    _writeNoteWithTag(responseRange, human, { mode:'daily', due: dueISO, base: String(baseDateISO_or_Category) });
-    _writeNoteWithTag(anchor,       human, { mode:'daily', due: dueISO, base: String(baseDateISO_or_Category) });
+    _writeNoteWithTag(responseRange, human, { mode: 'daily', due: dueISO, base: String(baseDateISO_or_Category) });
+    _writeNoteWithTag(anchor,       human, { mode: 'daily', due: dueISO, base: String(baseDateISO_or_Category) });
 
-    // On stocke streak dans n, et l'intervalle courant
-    sr.on = true; sr.unit = "days"; sr.n = next.n; sr.interval = next.interval; sr.due = dueISO;
-    delete sr.ef;                  // EF n'est plus utilisé
+    const sr = { on: true, unit: "days", n: streak, interval: interval, due: dueISO };
     _writeSRTag(anchor, sr);
-    return { unit:"days", dueISO, interval: next.interval, n: next.n };
+    return { unit: "days", dueISO, interval, n: streak };
   }
 
   if (mode === "practice") {
     const category = String(baseDateISO_or_Category);
-    const human = `⏱️ Revient dans ${next.interval} itération(s)`;
+    const human = `⏱️ Revient dans ${interval} itération(s)`;
 
-    _writeNoteWithTag(responseRange, human, { mode:'practice', category, remain: String(next.interval) });
-    _writeNoteWithTag(anchor,        human, { mode:'practice', category, remain: String(next.interval) });
+    _writeNoteWithTag(responseRange, human, { mode: 'practice', category, remain: String(interval) });
+    _writeNoteWithTag(anchor,        human, { mode: 'practice', category, remain: String(interval) });
 
-    sr.on = true; sr.unit = "iters"; sr.n = next.n; sr.interval = next.interval;
-    delete sr.due; delete sr.ef;
+    const sr = { on: true, unit: "iters", n: streak, interval: interval };
     _writeSRTag(anchor, sr);
-    return { unit:"iters", remain: next.interval, n: next.n };
+    return { unit: "iters", remain: interval, interval, n: streak };
   }
 
   return null;

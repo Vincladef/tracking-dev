@@ -327,6 +327,9 @@ async function initApp() {
     const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
     const iterRe = /\b(\d+)\s*\(/; // ex: "Badminton 12 (..)"
     const toKey = (e, idx) => {
+      // ✅ priorité: index de colonne envoyé par le backend
+      if (Number.isFinite(e.colIndex)) return e.colIndex;
+
       if (e.date && dateRe.test(e.date)) {
         const [, d, m, y] = e.date.match(dateRe);
         return new Date(`${y}-${m}-${d}`).getTime();
@@ -728,13 +731,14 @@ async function initApp() {
         input = document.createElement("textarea");
         input.name = q.id;
         input.rows = 4;
-        input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+        // sm = mobile ; md = ≥768px
+        input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
         input.value = referenceAnswer;
       } else {
         input = document.createElement("input");
         input.name = q.id;
         input.type = "text";
-        input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+        input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
         input.value = referenceAnswer;
       }
 
@@ -761,6 +765,7 @@ async function initApp() {
           const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
           const iterRe = /\b(\d+)\s*\(/; // ex: "Badminton 12 (..)"
           const toKey = (e, idx) => {
+            if (Number.isFinite(e.colIndex)) return e.colIndex;   // ⬅️ prioritaire, fiable
             if (e.date && dateRe.test(e.date)) {
               const [, d, m, y] = e.date.match(dateRe);
               return new Date(`${y}-${m}-${d}`).getTime();
@@ -901,12 +906,13 @@ async function initApp() {
         head.className = "px-3 py-2 flex items-center justify-between";
         const title = document.createElement("div");
         title.innerHTML = `<strong>${item.label}</strong>`;
-        const seeBtn = document.createElement("button");
-        seeBtn.type = "button";
-        seeBtn.className = "text-sm text-blue-600 hover:underline";
-        seeBtn.textContent = "voir";
         head.appendChild(title);
-        head.appendChild(seeBtn);
+
+        // r: toggle sur tout le header
+        head.classList.add("cursor-pointer");
+        head.addEventListener("click", () => {
+          content.classList.toggle("hidden");
+        });
 
         // infos "prochaine échéance"
         const sub = document.createElement("div");
@@ -915,9 +921,8 @@ async function initApp() {
         if (item.scheduleInfo?.nextDate) extras.push(`Prochaine : ${item.scheduleInfo.nextDate}`);
         if (Number(item.scheduleInfo?.remaining) > 0) extras.push(`Restant : ${item.scheduleInfo.remaining} itér.`);
         const tail = extras.length ? ` (${extras.join(" — ")})` : "";
-        sub.innerHTML = `⏱️ ${
-          item.reason || "Répétition espacée"
-        }${tail}`;
+        const reason = item.reason || "Répétition espacée";
+        sub.innerHTML = `⏱️ ${reason.replace(/^✅\s*/, '')}${tail}`;
 
         // contenu détaillé replié
         const content = document.createElement("div");
@@ -947,6 +952,7 @@ async function initApp() {
             const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
             const iterRe = /\b(\d+)\s*\(/;
             const toKey = (e, idx) => {
+              if (Number.isFinite(e.colIndex)) return e.colIndex;   // prioritaire, fiable
               if (e.date && dateRe.test(e.date)) {
                 const [, d, m, y] = e.date.match(dateRe);
                 return new Date(`${y}-${m}-${d}`).getTime();
@@ -1005,10 +1011,7 @@ async function initApp() {
           content.appendChild(historyBlock);
         }
 
-        // toggle du volet de l'item
-        seeBtn.addEventListener("click", () => {
-          content.classList.toggle("hidden");
-        });
+        // toggle du volet de l'item: supprimé (on clique sur l'entête)
 
         row.appendChild(head);
         row.appendChild(sub);

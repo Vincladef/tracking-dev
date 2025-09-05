@@ -63,7 +63,7 @@ function doGet(e) {
     const selectedCat = (e.parameter.category || "").toString().trim();
 
     const out = [];
-    data.forEach(row => {
+    data.forEach((row, idx) => {
       const freq = clean(row[FREQ_COL]);
       const cat = (row[CAT_COL] || "").toString().trim();
       if (!cat || cat !== selectedCat) return;
@@ -73,23 +73,34 @@ function doGet(e) {
       const label = row[LABEL_COL] || "";
       if (!label) return;
 
-      // Historique basé sur "Catégorie N"
+      // Historique "Catégorie N"
       const history = [];
       for (let c = 5; c < headers.length; c++) { // à partir de F
         const key = (headers[c] || "").toString();
         if (key.startsWith(selectedCat + " ")) {
           const val = row[c];
           if (val !== "" && val !== null && val !== undefined) {
-            history.push({ key, value: val });
+            history.push({ key, value: val, colIndex: c });
           }
         }
       }
+
+      // Lire tags / SR / remain depuis la note de l'ancre (col A)
+      const rowIndex = idx + 2; // data commence ligne 2
+      const anchor = sheet.getRange(rowIndex, 1);
+      const remain = getPracticeRemaining(anchor, selectedCat); // { remain, human } | null
+      const srInfo = getSRInfo(anchor); // { on, unit, n, interval, ... } | { on:false }
+      const skipped = shouldSkipPracticeRemaining(anchor, selectedCat);
 
       out.push({
         id: label,
         label,
         type,
-        history
+        history,
+        skipped,
+        scheduleInfo: remain
+          ? { unit: "iters", remaining: remain.remain, nextDate: null, sr: srInfo }
+          : { unit: "iters", remaining: 0,        nextDate: null, sr: srInfo }
       });
     });
 
@@ -160,7 +171,7 @@ function doGet(e) {
         const entryDate = new Date(`${y}-${m}-${d}`);
         const entryOnly = new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate());
         if (entryOnly <= refDateOnly) {
-          history.push({ value: val, date: dateStr });
+          history.push({ value: val, date: dateStr, colIndex: col });
         }
       }
     }
@@ -240,12 +251,43 @@ function doPost(e) {
     sheet.insertColumnBefore(targetIndex);
     sheet.getRange(1, targetIndex).setValue(newHeader);
 
-    // Écrire les réponses (mapping par label en colonne E)
+    // ⬇️ NOUVEAU : décrémenter le remain pour toute la catégorie
+    const lastRow = sheet.getLastRow();
+    decrementPracticeRemainForCategory(sheet, category, 2, Math.max(0, lastRow - 1), 1);
+
+    // Écriture des réponses + SR + délais/toggle SR
     const labels = sheet.getRange(2, 5, sheet.getLastRow() - 1).getValues().flat(); // col E
     for (let i = 0; i < labels.length; i++) {
       const label = labels[i];
+      const rowIdx = i + 2;
+      const anchor = sheet.getRange(rowIdx, 1);           // Col A = ancre
+      const rCell  = sheet.getRange(rowIdx, targetIndex); // cellule réponse
+
+      // 1) Toggle SR
+      const tKey = "__srToggle__" + label;
+      if (data[tKey] === "on" || data[tKey] === "off") {
+        setSRToggle(anchor, data[tKey] === "on", "iters");
+      }
+
+      // 2) Écriture de la réponse si fournie
       if (label && data[label] !== undefined && data[label] !== "") {
-        sheet.getRange(i + 2, targetIndex).setValue(data[label]);
+        rCell.setValue(data[label]);
+
+        // 3) SR après réponse (streak Fibonacci)
+        applySRAfterAnswer(rCell, 1, category, "practice", data[label]);
+      }
+
+      // 4) Délai manuel sur itérations
+      const dKey = "__delayIter__" + label;
+      if (dKey in data) {
+        const n = parseInt(data[dKey], 10);
+        if (Number.isFinite(n)) {
+          if (n <= 0) {
+            setPracticeDelayRemaining(rCell, category, 0);
+          } else {
+            setPracticeDelayRemaining(rCell, category, n);
+          }
+        }
       }
     }
 
