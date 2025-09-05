@@ -172,6 +172,11 @@ async function initApp() {
       .map(x=>x.e);
   }
 
+  function scrollToRight(el) {
+    if (!el) return;
+    requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
+  }
+
   function prettyKeyWithDate(entry) {
     const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
     const fullDate = (entry.date && dateRe.test(entry.date))
@@ -418,6 +423,8 @@ async function initApp() {
     // conteneur scrollable (mobile-friendly)
     const scroller = document.createElement("div");
     scroller.style.cssText = "width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-x;";
+    scroller.dataset.autoscroll = "right";
+    parentEl._likertScroller = scroller;
     parentEl.appendChild(scroller);
 
     const canvas = document.createElement("canvas");
@@ -930,7 +937,9 @@ async function initApp() {
         }
 
         toggleBtn.addEventListener("click", () => {
+          const wasHidden = historyBlock.classList.contains("hidden");
           historyBlock.classList.toggle("hidden");
+          if (wasHidden) scrollToRight(historyBlock._likertScroller);
         });
 
         wrapper.appendChild(toggleBtn);
@@ -982,7 +991,12 @@ async function initApp() {
         // r: toggle sur tout le header
         head.classList.add("cursor-pointer");
         head.addEventListener("click", () => {
+          const wasHidden = content.classList.contains("hidden");
           content.classList.toggle("hidden");
+          if (wasHidden) {
+            const sc = content.querySelector('[data-autoscroll="right"]');
+            scrollToRight(sc);
+          }
         });
 
         // infos "prochaine échéance"
