@@ -148,6 +148,30 @@ async function initApp() {
     console.log("✅ Sélecteur de mode et de date prêt.");
   }
 
+  // Ordonne l'historique pour l'affichage en liste: RÉCENT -> ANCIEN
+  function orderForHistory(hist) {
+    const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+    const iterRe = /\b(\d+)\s*\(/;
+    const toKey = (e, idx) => {
+      if (Number.isFinite(e.colIndex)) return { k:e.colIndex, kind:"col" };
+      if (e.date && dateRe.test(e.date)) {
+        const [,d,m,y] = e.date.match(dateRe); return { k:new Date(`${y}-${m}-${d}`).getTime(), kind:"time" };
+      }
+      if (e.key && dateRe.test(e.key)) {
+        const [,d,m,y] = e.key.match(dateRe); return { k:new Date(`${y}-${m}-${d}`).getTime(), kind:"time" };
+      }
+      if (e.key && iterRe.test(e.key)) return { k:parseInt(e.key.match(iterRe)[1],10), kind:"iter" };
+      return { k:idx, kind:"idx" };
+    };
+    return (Array.isArray(hist)?hist:[])
+      .map((e,i)=>({e,key:toKey(e,i)}))
+      .sort((a,b)=>{
+        if (a.key.kind==="col" && b.key.kind==="col") return a.key.k - b.key.k; // plus petit = plus récent
+        return b.key.k - a.key.k; // RÉCENT -> ANCIEN pour time/iter
+      })
+      .map(x=>x.e);
+  }
+
   await buildCombinedSelect();
 
   // État initial
@@ -318,19 +342,16 @@ async function initApp() {
     }
   }
 
-  // ⬇️ Remplacer TOUTE la fonction existante
+  // ⬇️ Version avec labels à chaque point et largeur dynamique
   function renderLikertChart(parentEl, history, normalize) {
     const hist = Array.isArray(history) ? history.slice() : [];
     if (!hist.length) return;
 
-    // --- Ordre: ancien -> récent (récent à DROITE)
+    // ---- Ordonnancement: ANCIEN -> RÉCENT (récent à DROITE)
     const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
     const iterRe = /\b(\d+)\s*\(/; // "Catégorie 12 (...)"
-    // On retourne une clé ET un "type" pour savoir comment trier
     const toKey = (e, idx) => {
-      if (Number.isFinite(e.colIndex)) {
-        return { k: e.colIndex, kind: "col" };          // plus petit => plus récent
-      }
+      if (Number.isFinite(e.colIndex)) return { k: e.colIndex, kind: "col" }; // plus petit = plus récent dans ta feuille
       if (e.date && dateRe.test(e.date)) {
         const [, d, m, y] = e.date.match(dateRe);
         return { k: new Date(`${y}-${m}-${d}`).getTime(), kind: "time" };
@@ -339,23 +360,16 @@ async function initApp() {
         const [, d, m, y] = e.key.match(dateRe);
         return { k: new Date(`${y}-${m}-${d}`).getTime(), kind: "time" };
       }
-      if (e.key && iterRe.test(e.key)) {
-        return { k: parseInt(e.key.match(iterRe)[1], 10), kind: "iter" }; // plus grand => plus récent
-      }
+      if (e.key && iterRe.test(e.key)) return { k: parseInt(e.key.match(iterRe)[1], 10), kind: "iter" };
       return { k: idx, kind: "idx" };
     };
-    // ATTENTION au sens du tri :
-    // - colIndex : plus grand = plus ancien  -> tri DESC pour mettre l'ancien à gauche
-    // - time/iter : plus petit = plus ancien -> tri ASC
     const ordered = hist
-      .map((e, i) => ({ e, key: toKey(e, i) }))
-      .sort((a, b) => {
-        if (a.key.kind === "col" && b.key.kind === "col") {
-          return b.key.k - a.key.k; // DESC -> ancien à gauche
-        }
-        return a.key.k - b.key.k;   // ASC  -> ancien à gauche
+      .map((e,i)=>({e, key:toKey(e,i)}))
+      .sort((a,b) => {
+        if (a.key.kind === "col" && b.key.kind === "col") return b.key.k - a.key.k; // DESC -> ancien à gauche
+        return a.key.k - b.key.k; // ASC  -> ancien à gauche
       })
-      .map(x => x.e);
+      .map(x=>x.e);
 
     // --- Mapping Likert
     const levels = ["non","plutot non","moyen","plutot oui","oui"];
@@ -370,13 +384,20 @@ async function initApp() {
     }).filter(Boolean);
     if (points.length < 2) return;
 
-    // --- Layout
-    const pad = { l: 16, r: 86, t: 14, b: 28 }; // légende à droite => marge droite large
-    const stepPx = 28;
+    // ---- Mesurer la largeur des labels pour espacement sans chevauchement
+    const measCanvas = document.createElement("canvas");
+    const mctx = measCanvas.getContext("2d");
+    mctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+    let maxLabelW = 0;
+    for (const p of points) maxLabelW = Math.max(maxLabelW, Math.ceil(mctx.measureText(p.label).width));
+    const stepPx = Math.max(28, maxLabelW + 12);
+
+    // ---- Layout
+    const pad = { l: 16, r: 86, t: 14, b: 30 }; // légende à droite
     const parentW = Math.max(300, Math.floor(parentEl.getBoundingClientRect().width || 300));
     const neededPlotW = (points.length - 1) * stepPx + pad.l + pad.r;
     const plotW = Math.max(parentW, neededPlotW);
-    const plotH = 170;
+    const plotH = 176;
 
     // conteneur scrollable (mobile-friendly)
     const scroller = document.createElement("div");
@@ -423,27 +444,12 @@ async function initApp() {
       ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + w, y); ctx.stroke();
     }
 
-    // --- repères X
+    // --- repères X et labels à chaque point
     const n = points.length;
     const step = n > 1 ? w / (n - 1) : w;
-    ctx.strokeStyle = "#f5f6f8";
-    const every = Math.max(1, Math.floor(n / 8));
-    for (let i = 0; i < n; i += every) {
-      const x = pad.l + i * step;
-      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + h); ctx.stroke();
-    }
-
-    // --- labels X (début / milieu / fin + échantillonnage)
     ctx.fillStyle = "#6b7280";
     ctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
-    const labelAt = (i, text) => {
-      const x = pad.l + i * step;
-      ctx.fillText(text, x - 16, pad.t + h + 18);
-    };
-    labelAt(0, (points[0].label || "").slice(0,5));
-    labelAt(n-1, (points[n-1].label || "").slice(0,5));
-    const mid = Math.floor(n/2);
-    if (n > 3) labelAt(mid, (points[mid].label || "").slice(0,5));
+    ctx.textAlign = "center";
 
     // --- légende à DROITE (Oui en haut, Non en bas)
     ctx.textAlign = "left";
@@ -477,6 +483,10 @@ async function initApp() {
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
       ctx.beginPath(); ctx.arc(x, y, dotRadius, 0, Math.PI*2); ctx.fill();
       dotXY.push({x,y, p});
+      // label sous chaque point
+      ctx.fillStyle = "#6b7280";
+      ctx.fillText(p.label, x, pad.t + h + 18);
+      ctx.fillStyle = "#111827";
     });
 
     // --- axe X
@@ -816,26 +826,7 @@ async function initApp() {
         renderLikertChart(historyBlock, q.history, normalize);
 
         // --- Tri commun pour stats & liste : RÉCENT -> ANCIEN ---
-        const orderedForStats = (() => {
-          const hist = Array.isArray(q.history) ? q.history.slice() : [];
-          const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
-          const iterRe = /\b(\d+)\s*\(/; // ex: "Badminton 12 (..)"
-          const toKey = (e, idx) => {
-            if (Number.isFinite(e.colIndex)) return e.colIndex;   // ⬅️ prioritaire, fiable
-            if (e.date && dateRe.test(e.date)) {
-              const [, d, m, y] = e.date.match(dateRe);
-              return new Date(`${y}-${m}-${d}`).getTime();
-            }
-            if (e.key && dateRe.test(e.key)) {
-              const [, d, m, y] = e.key.match(dateRe);
-              return new Date(`${y}-${m}-${d}`).getTime();
-            }
-            if (e.key && iterRe.test(e.key)) return parseInt(e.key.match(iterRe)[1], 10);
-            return idx; // fallback
-          };
-          // tri croissant puis on inverse pour avoir récent -> ancien
-          return hist.map((e,i)=>({e,k:toKey(e,i)})).sort((a,b)=>a.k-b.k).map(x=>x.e).reverse();
-        })();
+        const orderedForStats = orderForHistory(q.history);
 
         // --- Stats compactes sur fenêtre récente ---
         const LIMIT = 10;
@@ -1002,26 +993,8 @@ async function initApp() {
           // graphe likert
           renderLikertChart(historyBlock, item.history, normalize);
 
-          // liste (récents -> anciens)
-          const ordered = (() => {
-            const hist = Array.isArray(item.history) ? item.history.slice() : [];
-            const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
-            const iterRe = /\b(\d+)\s*\(/;
-            const toKey = (e, idx) => {
-              if (Number.isFinite(e.colIndex)) return e.colIndex;   // prioritaire, fiable
-              if (e.date && dateRe.test(e.date)) {
-                const [, d, m, y] = e.date.match(dateRe);
-                return new Date(`${y}-${m}-${d}`).getTime();
-              }
-              if (e.key && dateRe.test(e.key)) {
-                const [, d, m, y] = e.key.match(dateRe);
-                return new Date(`${y}-${m}-${d}`).getTime();
-              }
-              if (e.key && iterRe.test(e.key)) return parseInt(e.key.match(iterRe)[1], 10);
-              return idx;
-            };
-            return hist.map((e,i)=>({e,k:toKey(e,i)})).sort((a,b)=>a.k-b.k).map(x=>x.e).reverse();
-          })();
+          // liste (RÉCENTS -> ANCIENS)
+          const ordered = orderForHistory(item.history);
 
           const colorMap = {
             "oui": "bg-green-100 text-green-800",
