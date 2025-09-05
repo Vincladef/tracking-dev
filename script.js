@@ -318,58 +318,51 @@ async function initApp() {
     }
   }
 
-  // Remplace TOUTE ta fonction renderLikertChart par celle-ci
+  // ⬇️ Remplacer TOUTE la fonction existante
   function renderLikertChart(parentEl, history, normalize) {
     const hist = Array.isArray(history) ? history.slice() : [];
     if (!hist.length) return;
 
-    // ---- Ordonner ancien -> récent (récent à DROITE)
+    // --- Ordre: ancien -> récent (récent à DROITE)
     const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
-    const iterRe = /\b(\d+)\s*\(/; // ex: "Badminton 12 (..)"
+    const iterRe = /\b(\d+)\s*\(/; // "Catégorie 12 (...)"
     const toKey = (e, idx) => {
-      // ✅ priorité: index de colonne envoyé par le backend
-      if (Number.isFinite(e.colIndex)) return e.colIndex;
-
+      if (Number.isFinite(e.colIndex)) return e.colIndex;             // le plus fiable
       if (e.date && dateRe.test(e.date)) {
-        const [, d, m, y] = e.date.match(dateRe);
-        return new Date(`${y}-${m}-${d}`).getTime();
+        const [, d, m, y] = e.date.match(dateRe); return new Date(`${y}-${m}-${d}`).getTime();
       }
       if (e.key && dateRe.test(e.key)) {
-        const [, d, m, y] = e.key.match(dateRe);
-        return new Date(`${y}-${m}-${d}`).getTime();
+        const [, d, m, y] = e.key.match(dateRe); return new Date(`${y}-${m}-${d}`).getTime();
       }
       if (e.key && iterRe.test(e.key)) return parseInt(e.key.match(iterRe)[1], 10);
-      return idx; // fallback: ordre fourni
+      return idx;
     };
     const ordered = hist.map((e,i)=>({e,k:toKey(e,i)})).sort((a,b)=>a.k-b.k).map(x=>x.e);
 
-    // ---- Points Likert
+    // --- Mapping Likert
     const levels = ["non","plutot non","moyen","plutot oui","oui"];
-    const labelByNorm = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
+    const pretty  = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
     const points = ordered.map(e => {
       const v = normalize(e.value);
       const idx = levels.indexOf(v);
-      return (idx === -1) ? null : { v, idx, raw:e };
+      if (idx === -1) return null;
+      // clef d’affichage (date > header > itération)
+      let label = e.date || (e.key && (e.key.match(dateRe)?.[0] || e.key)) || "";
+      return { idx, v, label, raw: e };
     }).filter(Boolean);
     if (points.length < 2) return;
 
-    // ---- Layout responsive + scrollable (mobile)
-    const pad = { l: 70, r: 16, t: 10, b: 28 };
-    const stepPx = 28;             // espacement horizontal par point
-    const parentW = Math.max(280, Math.floor(parentEl.getBoundingClientRect().width || 280));
+    // --- Layout
+    const pad = { l: 16, r: 86, t: 14, b: 28 }; // légende à droite => marge droite large
+    const stepPx = 28;
+    const parentW = Math.max(300, Math.floor(parentEl.getBoundingClientRect().width || 300));
     const neededPlotW = (points.length - 1) * stepPx + pad.l + pad.r;
-    const plotW = Math.max(parentW, neededPlotW);   // si plus grand -> overflow horizontal
-    const plotH = 160;
+    const plotW = Math.max(parentW, neededPlotW);
+    const plotH = 170;
 
+    // conteneur scrollable (mobile-friendly)
     const scroller = document.createElement("div");
-    // styles inline pour garantir le scroll sur mobile
-    scroller.style.width = "100%";
-    scroller.style.maxWidth = "100%";
-    scroller.style.display = "block";
-    scroller.style.overflowX = "auto";
-    scroller.style.overflowY = "hidden";
-    scroller.style.WebkitOverflowScrolling = "touch";
-    scroller.style.touchAction = "pan-x";
+    scroller.style.cssText = "width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-x;";
     parentEl.appendChild(scroller);
 
     const canvas = document.createElement("canvas");
@@ -379,9 +372,14 @@ async function initApp() {
     canvas.style.width  = plotW + "px";
     canvas.style.height = plotH + "px";
     canvas.style.display = "block";
-    canvas.style.maxWidth = "none";  // IMPORTANT: ne pas se rétrécir
-    canvas.className = "mb-3 rounded";
+    canvas.style.borderRadius = "10px";
     scroller.appendChild(canvas);
+
+    // petit tooltip
+    const tip = document.createElement("div");
+    tip.style.cssText = "position:absolute;padding:6px 8px;background:#111827;color:#fff;border-radius:6px;font-size:12px;pointer-events:none;opacity:0;transform:translate(-50%,-120%);white-space:nowrap;transition:opacity .12s;";
+    scroller.style.position = "relative";
+    scroller.appendChild(tip);
 
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
@@ -389,46 +387,60 @@ async function initApp() {
     const w = plotW - pad.l - pad.r;
     const h = plotH - pad.t - pad.b;
 
-    // fond
+    // --- fond arrondi
+    const r = 10;
+    ctx.save();
+    const rr = (x,y,w,h,r) => { ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); };
+    rr(4,4,plotW-8,plotH-8,r);
+    ctx.clip();
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, plotW, plotH);
+    ctx.fillRect(0,0,plotW,plotH);
+    ctx.restore();
 
-    // grille + labels Y
-    ctx.strokeStyle = "#e5e7eb";
+    // --- grille douce
+    ctx.strokeStyle = "#eaecef";
     ctx.lineWidth = 1;
-    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
-    ctx.fillStyle = "#374151";
     for (let i = 0; i < levels.length; i++) {
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i);
       ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + w, y); ctx.stroke();
-      ctx.fillText(labelByNorm[levels[i]] || levels[i], 8, y + 4);
     }
 
-    // ticks X
+    // --- repères X
     const n = points.length;
     const step = n > 1 ? w / (n - 1) : w;
-    const xTickEvery = Math.max(1, Math.floor(n / 10));
-    ctx.strokeStyle = "#f3f4f6";
-    for (let i = 0; i < n; i += xTickEvery) {
+    ctx.strokeStyle = "#f5f6f8";
+    const every = Math.max(1, Math.floor(n / 8));
+    for (let i = 0; i < n; i += every) {
       const x = pad.l + i * step;
       ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + h); ctx.stroke();
     }
 
-    // labels X (dates / itérations)
-    ctx.font = "10px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+    // --- labels X (début / milieu / fin + échantillonnage)
     ctx.fillStyle = "#6b7280";
-    for (let i = 0; i < n; i += xTickEvery) {
+    ctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+    const labelAt = (i, text) => {
       const x = pad.l + i * step;
-      const e = points[i].raw;
-      let label = "";
-      if (e.date && dateRe.test(e.date)) label = e.date.slice(0,5);
-      else if (e.key && dateRe.test(e.key)) label = e.key.match(dateRe)[0].slice(0,5);
-      else if (e.key && iterRe.test(e.key)) label = "N=" + e.key.match(iterRe)[1];
-      ctx.fillText(label, x - 16, pad.t + h + 16);
+      ctx.fillText(text, x - 16, pad.t + h + 18);
+    };
+    labelAt(0, (points[0].label || "").slice(0,5));
+    labelAt(n-1, (points[n-1].label || "").slice(0,5));
+    const mid = Math.floor(n/2);
+    if (n > 3) labelAt(mid, (points[mid].label || "").slice(0,5));
+
+    // --- légende à DROITE (Oui en haut, Non en bas)
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#374151";
+    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+    for (let i = 0; i < levels.length; i++) {
+      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i);
+      ctx.fillText(pretty[levels[i]] || levels[i], pad.l + w + 10, y + 4);
     }
 
-    // courbe
-    ctx.strokeStyle = "#2563eb";
+    // --- ligne avec dégradé
+    const grad = ctx.createLinearGradient(pad.l, 0, pad.l + w, 0);
+    grad.addColorStop(0,  "#60a5fa"); // bleu clair
+    grad.addColorStop(1,  "#7c3aed"); // violet
+    ctx.strokeStyle = grad;
     ctx.lineWidth = 2;
     ctx.beginPath();
     points.forEach((p, i) => {
@@ -438,21 +450,47 @@ async function initApp() {
     });
     ctx.stroke();
 
-    // points
-    ctx.fillStyle = "#1f2937";
+    // --- points
+    ctx.fillStyle = "#111827";
+    const dotRadius = 2.8;
+    const dotXY = [];
     points.forEach((p, i) => {
       const x = pad.l + i * step;
       const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
-      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, dotRadius, 0, Math.PI*2); ctx.fill();
+      dotXY.push({x,y, p});
     });
 
-    // axe X
-    ctx.strokeStyle = "#9ca3af";
+    // --- axe X
+    ctx.strokeStyle = "#d1d5db";
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(pad.l, pad.t + h); ctx.lineTo(pad.l + w, pad.t + h); ctx.stroke();
 
-    // se placer tout à droite (le plus récent) s'il y a overflow
+    // --- scroll au plus récent (droite) si overflow
     requestAnimationFrame(() => { scroller.scrollLeft = scroller.scrollWidth; });
+
+    // --- tooltip simple
+    canvas.addEventListener("mousemove", (ev) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = (ev.clientX - rect.left);
+      const y = (ev.clientY - rect.top);
+      // cherche le point le plus proche
+      let best = null, bestD = 99999;
+      for (const d of dotXY) {
+        const dx = x - d.x, dy = y - d.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < bestD) { bestD = dist; best = d; }
+      }
+      if (best && bestD < 18) {
+        tip.style.left = Math.round(best.x) + "px";
+        tip.style.top  = Math.round(best.y) + "px";
+        tip.innerHTML = `${best.p.label || ""} · <b>${pretty[best.p.v] || best.p.v}</b>`;
+        tip.style.opacity = "1";
+      } else {
+        tip.style.opacity = "0";
+      }
+    });
+    canvas.addEventListener("mouseleave", () => { tip.style.opacity = "0"; });
   }
 
   function addDelayUI(wrapper, q) {
