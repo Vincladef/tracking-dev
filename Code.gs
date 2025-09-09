@@ -13,6 +13,12 @@ const ANSWER_VALUES = {
 };
 const DELAYS = [0, 1, 2, 3, 5, 8, 13];
 const JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
+function withLock(fn){
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try { return fn(); }
+  finally { lock.releaseLock(); }
+}
 
 function clean(str) {
   return (str || "")
@@ -56,22 +62,55 @@ function doGet(e) {
 
   // ---------- MODE OVERVIEW (vue globale) ----------
   if (clean(e?.parameter?.mode) === "overview") {
-  const todayISO = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
-    const dailyResp = JSON.parse(doGet({ parameter: { date: todayISO } }).getContent());
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const refDayName = today.toLocaleDateString("fr-FR", { weekday: "long" }).toLowerCase();
 
-    // Compteurs P1/P2/P3/total (hors items masqués)
-    const toDo = { p1:0, p2:0, p3:0, total:0 };
-    dailyResp.forEach(q => {
-      const p = q.priority || 2;
-      if (!q.skipped) {
-        if (p === 1) toDo.p1++;
-        else if (p === 2) toDo.p2++;
-        else toDo.p3++;
-        toDo.total++;
+    // Construire dailyResp localement à partir de headers/data
+    const result = [];
+    for (let idx = 0; idx < data.length; idx++) {
+      const row = data[idx];
+      const type = row[2] || "";   // C
+      const freqRaw = row[3] || ""; // D
+      const label = row[4] || "";  // E
+      const cat = row[1] || "";    // B
+
+      const freq = clean(freqRaw);
+      if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) continue; // exclure pratique
+
+      const isQuotidien = freq.includes("quotidien");
+      const matchingDays = JOURS.filter(j => freq.includes(j));
+      let include = isQuotidien || matchingDays.includes(refDayName);
+
+      // SR pour overview: ne pas masquer, juste priorité et label suffisent
+      const rowIndex = idx + 2;
+      const anchor = sheet.getRange(rowIndex, 1);
+      const priority = getPriority(anchor);
+      const qid = ensureRowId(anchor);
+
+      // Historique pour streaks
+      const history = [];
+      for (let col = headers.length - 1; col >= 5; col--) {
+        const dateStr = headers[col];
+        if (!/^\d{2}\/\d{2}\/\d{4}$/.test(String(dateStr))) continue;
+        const val = row[col];
+        if (val !== "" && val !== null && val !== undefined) {
+          history.push({ value: val, date: dateStr, colIndex: col });
+        }
       }
+
+      if (include && label) {
+        result.push({ id: qid, label, priority, history });
+      }
+    }
+
+    const toDo = { p1:0, p2:0, p3:0, total:0 };
+    result.forEach(q => {
+      const p = q.priority || 2;
+      if (p === 1) toDo.p1++; else if (p === 2) toDo.p2++; else toDo.p3++;
+      toDo.total++;
     });
 
-    // Top streaks: tri fiable par date réelle (et pas par colIndex)
     function norm(v){ return clean(v); }
     const POS = new Set(["oui","plutot oui"]);
     const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
@@ -80,18 +119,13 @@ function doGet(e) {
       const m = s.match(dateRe);
       return m ? new Date(`${m[3]}-${m[2]}-${m[1]}`) : null;
     };
-
-    const streaks = dailyResp.map(q => {
+    const streaks = result.map(q => {
       const ord = (q.history || [])
         .map(h => ({ h, d: dateOf(h) }))
-        .filter(x => x.d)                 // garde seulement les entrées datées
-        .sort((a,b) => b.d - a.d)         // récent → ancien
+        .filter(x => x.d)
+        .sort((a,b) => b.d - a.d)
         .map(x => x.h);
-
-      let s = 0;
-      for (const e of ord) {
-        if (POS.has(norm(e.value))) s++; else break;
-      }
+      let s = 0; for (const e2 of ord) { if (POS.has(norm(e2.value))) s++; else break; }
       return { id: q.id, label: q.label, priority: q.priority || 2, streak: s };
     }).sort((a,b) => b.streak - a.streak).slice(0, 5);
 
@@ -318,7 +352,12 @@ function doGet(e) {
 // ============================
 function doPost(e) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Tracking');
-  const data = JSON.parse(e.postData.contents || "{}");
+  let data = {};
+  try {
+    data = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : "{}");
+  } catch (err) {
+    return ContentService.createTextOutput("❌ JSON invalide").setMimeType(ContentService.MimeType.TEXT);
+  }
 
   // ---------- CONSIGNES: create/update/delete ----------
   if (clean(data._action) === "consigne_create" ||
@@ -338,6 +377,10 @@ function doPost(e) {
       const anchor = sheet.getRange(lastRow, 1);
       ensureRowId(anchor);
       setPriority(anchor, parseInt(data.priority,10)||2);
+      // SR ON par défaut : en jours pour le quotidien/jours/sr, en itérations pour la pratique délibérée
+      const f = clean(data.frequency || "");
+      const unit = (f.includes("pratique deliberee") || f.includes("pratique délibérée")) ? "iters" : "days";
+      setSRToggle(anchor, true, unit);
       return ContentService.createTextOutput("✅ consigne créée").setMimeType(ContentService.MimeType.TEXT);
     }
 
@@ -394,8 +437,10 @@ function doPost(e) {
 
     // Insérer la nouvelle colonne à l’index cible (F = 6)
     const targetIndex = 6;
-    sheet.insertColumnBefore(targetIndex);
-    sheet.getRange(1, targetIndex).setValue(newHeader);
+    withLock(function(){
+      sheet.insertColumnBefore(targetIndex);
+      sheet.getRange(1, targetIndex).setValue(newHeader);
+    });
 
     // ⬇️ NOUVEAU : décrémenter le remain pour toute la catégorie
     const lastRow = sheet.getLastRow();
@@ -444,21 +489,23 @@ function doPost(e) {
 
   if (dateColIndex === 0) {
     // nouvelle colonne à F
-    sheet.insertColumnBefore(targetIndex);
-    sheet.getRange(1, targetIndex).setValue(dateStr);
+    withLock(function(){
+      sheet.insertColumnBefore(targetIndex);
+      sheet.getRange(1, targetIndex).setValue(dateStr);
+    });
     dateColIndex = targetIndex;
   } else if (dateColIndex !== targetIndex) {
-    // déplacer la colonne existante à F, en compensant le décalage après suppression
-    sheet.insertColumnBefore(targetIndex);
-    const lastRow = sheet.getLastRow();
-
-    // 1-based
-    const sourceIndex = (dateColIndex >= targetIndex) ? (dateColIndex + 1) : dateColIndex;
-    // si la source est avant F, on vise temporairement G (= F+1), qui deviendra F après suppression
-    const destIndex = (dateColIndex < targetIndex) ? (targetIndex + 1) : targetIndex;
-
-    sheet.getRange(1, sourceIndex, lastRow).moveTo(sheet.getRange(1, destIndex, lastRow));
-    sheet.deleteColumn(sourceIndex); // après suppression, la date est bien en F
+    // Déplacement complet sous verrou (recalcule les indices pour éviter les décalages concurrentiels)
+    withLock(function(){
+      const headersNow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      let dateColIndexNow = headersNow.indexOf(dateStr) + 1; // 1-based
+      sheet.insertColumnBefore(targetIndex);
+      const lastRowNow = sheet.getLastRow();
+      const sourceIndex = (dateColIndexNow >= targetIndex) ? (dateColIndexNow + 1) : dateColIndexNow;
+      const destIndex   = (dateColIndexNow <  targetIndex) ? (targetIndex + 1) : targetIndex;
+      sheet.getRange(1, sourceIndex, lastRowNow).moveTo(sheet.getRange(1, destIndex, lastRowNow));
+      sheet.deleteColumn(sourceIndex);
+    });
     dateColIndex = targetIndex;
   }
 
