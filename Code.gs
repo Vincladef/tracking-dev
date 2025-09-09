@@ -164,6 +164,8 @@ function doGet(e) {
         type,
         history,
         skipped,
+        category: selectedCat,
+        frequency: row[FREQ_COL] || "",
         scheduleInfo: remain
           ? { unit: "iters", remaining: remain.remain, nextDate: null, sr: srInfo }
           : { unit: "iters", remaining: 0,        nextDate: null, sr: srInfo },
@@ -212,6 +214,7 @@ function doGet(e) {
     const type = row[2] || "";   // C
     const freqRaw = row[3] || ""; // D
     const label = row[4] || "";  // E
+    const cat = row[1] || "";    // B
 
     const freq = clean(freqRaw);
     const isQuotidien = freq.includes("quotidien");
@@ -305,9 +308,11 @@ function doGet(e) {
     const srInfo = getSRInfo(anchor);
     const base = {
       id: qid, label, type, history, isSpaced, spacedInfo, priority,
+      category: cat,
+      frequency: freqRaw,
       scheduleInfo: {
         unit: "days",
-        nextDate: nextDate || spacedInfo?.nextDate || null, // manuel > auto
+        nextDate: nextDate || spacedInfo?.nextDate || null,
         sr: srInfo
       }
     };

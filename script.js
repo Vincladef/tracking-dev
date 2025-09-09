@@ -63,33 +63,130 @@ function showToast(message, tone = "green") {
   t._hideTimer = setTimeout(() => t.classList.add("hidden"), 2400);
 }
 
-async function initApp() {
-  // ✅ Mémoire des délais sélectionnés (clé -> valeur)
-  window.__delayValues = window.__delayValues || {};
+const PRIO = {
+  1: { text: "Haute",   badge: "bg-red-100 text-red-700" },
+  2: { text: "Normale", badge: "bg-gray-100 text-gray-800" },
+  3: { text: "Basse",   badge: "bg-green-100 text-green-700" }
+};
+function prioritySelect(value=2){
+  const s = document.createElement("select");
+  s.className = "text-sm border rounded px-2 py-1 bg-white";
+  [["1","Haute"],["2","Normale"],["3","Basse"]].forEach(([v,t])=>{
+    const o = document.createElement("option"); o.value=v; o.textContent=t; if (String(value)===v) o.selected=true; s.appendChild(o);
+  });
+  return s;
+}
 
-  // états SR en mémoire
-  window.__srToggles  = window.__srToggles || {}; // état courant (on/off) tel que l’UI l’affiche
-  window.__srBaseline = window.__srBaseline || {}; // état de référence venu du backend (pour ne POSTer que les différences)
+function addSROnlyUI(wrapper, q) {
+  const row = document.createElement("div");
+  row.className = "mt-2 flex items-center gap-3";
 
-  // Titre dynamique
-  document.getElementById("user-title").textContent =
-    `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
-  // --- Navigation Accueil / Formulaires
-  const homeView = document.getElementById("home-view");
-  const formsView = document.getElementById("forms-view");
-  if (document.getElementById("btn-home")) {
-    document.getElementById("btn-home").addEventListener("click", () => {
-      homeView.classList.remove("hidden");
-      formsView.classList.add("hidden");
-      loadOverview();
-    });
+  window.__srToggles  = window.__srToggles  || {};
+  window.__srBaseline = window.__srBaseline || {};
+  const srCurrent = q.scheduleInfo?.sr || { on:false };
+  if (!(q.id in window.__srBaseline)) window.__srBaseline[q.id] = srCurrent.on ? "on":"off";
+  if (!(q.id in window.__srToggles))  window.__srToggles[q.id]  = srCurrent.on ? "on":"off";
+
+  const label = document.createElement("span");
+  label.className = "text-sm text-gray-700";
+  label.textContent = "⏱️ Répétition espacée";
+  row.appendChild(label);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  const refresh = () => {
+    const on = window.__srToggles[q.id] === "on";
+    btn.className = "text-sm px-2 py-1 rounded " + (on ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-800");
+    btn.textContent = on ? "ON" : "OFF";
+  };
+  btn.addEventListener("click", () => {
+    window.__srToggles[q.id] = (window.__srToggles[q.id] === "on" ? "off" : "on");
+    refresh();
+  });
+  refresh();
+  row.appendChild(btn);
+
+  if (q.scheduleInfo?.sr?.interval || q.scheduleInfo?.sr?.due) {
+    const meta = document.createElement("span");
+    meta.className = "text-xs text-gray-500";
+    const sr = q.scheduleInfo.sr;
+    meta.textContent = sr.unit==="iters"
+      ? `(${sr.interval||0} itérations)`
+      : (sr.due ? `(prochaine ${sr.due})` : `(${sr.interval||0} j)`);
+    row.appendChild(meta);
   }
 
-  // On enlève l’ancien affichage de date (non nécessaire avec le sélecteur)
-  const dateDisplay = document.getElementById("date-display");
-  if (dateDisplay) dateDisplay.remove();
+  wrapper.appendChild(row);
+}
 
-  // Références éléments existants
+function consigneEditorForm(defaults){
+  const c = Object.assign({ category:"", type:"", frequency:"", label:"", priority:2 }, defaults||{});
+  const box = document.createElement("div");
+  box.className = "mt-2 p-3 rounded border bg-white";
+
+  box.innerHTML = `
+    <div class="grid md:grid-cols-2 gap-2">
+      <input class="ce-cat border rounded px-2 py-1" placeholder="Catégorie" value="${c.category||""}">
+      <input class="ce-type border rounded px-2 py-1" placeholder="Type (Oui/Non, Likert, Texte…)" value="${c.type||""}">
+      <input class="ce-freq border rounded px-2 py-1" placeholder="Fréquence (quotidien, mardi, répétition espacée, pratique délibérée…)" value="${c.frequency||""}">
+      <span class="ce-prio"></span>
+    </div>
+    <input class="ce-label border rounded px-2 py-1 w-full mt-2" placeholder="Intitulé" value="${c.label||""}">
+    <div class="mt-2 flex gap-2">
+      <button class="ce-save px-3 py-1 rounded bg-green-600 text-white">Enregistrer</button>
+      <button class="ce-cancel px-3 py-1 rounded bg-gray-100">Annuler</button>
+    </div>
+  `;
+  const prioMount = box.querySelector(".ce-prio");
+  const sel = prioritySelect(c.priority||2);
+  prioMount.appendChild(sel);
+
+  box._get = () => ({
+    category: box.querySelector(".ce-cat").value,
+    type:     box.querySelector(".ce-type").value,
+    frequency:box.querySelector(".ce-freq").value,
+    label:    box.querySelector(".ce-label").value,
+    priority: parseInt(sel.value,10)
+  });
+  return box;
+}
+
+function openConsigneEditorInline(mountEl, qOrNull){
+  const isUpdate = !!qOrNull?.id;
+  const form = consigneEditorForm(isUpdate ? {
+    category: qOrNull.category, type: qOrNull.type, frequency: qOrNull.frequency,
+    label: qOrNull.label, priority: qOrNull.priority
+  } : {});
+  mountEl.appendChild(form);
+
+  const onCancel = () => form.remove();
+  form.querySelector(".ce-cancel").addEventListener("click", onCancel);
+
+  form.querySelector(".ce-save").addEventListener("click", async ()=>{
+    const vals = form._get();
+    try{
+      const payload = isUpdate
+        ? { _action:"consigne_update", id: qOrNull.id, category: vals.category, type: vals.type, frequency: vals.frequency, newLabel: vals.label, priority: vals.priority }
+        : { _action:"consigne_create", category: vals.category, type: vals.type, frequency: vals.frequency, label: vals.label, priority: vals.priority };
+
+      await fetch(`${apiUrl}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
+      showToast(isUpdate ? "✅ Consigne mise à jour" : "✅ Consigne créée");
+      handleSelectChange();
+    }catch(e){ showToast("❌ Erreur enregistrement", "red"); }
+  });
+}
+
+async function initApp() {
+  window.__srToggles  = window.__srToggles || {};
+  window.__srBaseline = window.__srBaseline || {};
+
+  document.getElementById("user-title").textContent =
+    `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
+
+  // Pas de page d’accueil : on force l’affichage du formulaire
+  document.getElementById("forms-view")?.classList.remove("hidden");
+  document.getElementById("home-view")?.classList.add("hidden");
+
   const dateSelect = document.getElementById("date-select");
   dateSelect.classList.add("mb-4");
 
@@ -210,7 +307,7 @@ async function initApp() {
     if (window.__srBaseline)  window.__srBaseline  = {};
 
     const sel = document.getElementById("date-select");
-    if (!sel || !sel.selectedOptions.length) return;
+    if (!sel || !sel.selectedOptions.length) return; 
     const selected = sel.selectedOptions[0];
     const mode = selected.dataset.mode || "daily";
     if (mode === "daily") {
@@ -857,13 +954,21 @@ async function initApp() {
     container.innerHTML = "";
     console.log(`✍️ Rendu de ${questions.length} question(s)`);
 
+    const addBar = document.createElement("div");
+    addBar.className = "mb-4";
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "px-3 py-2 rounded bg-green-600 text-white";
+    addBtn.textContent = "➕ Ajouter une consigne";
+    addBtn.addEventListener("click", () => openConsigneEditorInline(container, null));
+    addBar.appendChild(addBtn);
+    container.appendChild(addBar);
+
     const visible = [], hiddenSR = [];
     (questions||[]).forEach(q => (q.skipped ? hiddenSR : visible).push(q));
 
-    // TRI : P1 -> P2 -> P3
     visible.sort((a,b)=> (a.priority||2)-(b.priority||2));
 
-    // Groupes
     const p1 = visible.filter(q => (q.priority||2) === 1);
     const p2 = visible.filter(q => (q.priority||2) === 2);
     const p3 = visible.filter(q => (q.priority||2) === 3);
@@ -890,64 +995,108 @@ async function initApp() {
         const wrap = document.createElement("div");
         wrap.className = `mb-4 p-4 rounded-lg shadow-sm ${style.card}`;
 
-      const label = document.createElement("label");
-      label.className = "block text-lg font-semibold mb-2";
-      label.textContent = q.label;
+        const label = document.createElement("label");
+        label.className = "block text-lg font-semibold mb-2";
+        label.textContent = q.label;
         wrap.appendChild(label);
 
-        // Réutilise la logique de rendu existante pour les champs + délai + historique
-        // Pré-remplissage (journalier)
-      let referenceAnswer = "";
-      if (q.history && Array.isArray(q.history)) {
-        const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
-        if (dateISO) {
-          const entry = q.history.find(entry => {
-            if (entry?.date) {
-              const [dd, mm, yyyy] = entry.date.split("/");
-              const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-              return entryDateISO === dateISO;
-            }
-            return false;
-          });
-          referenceAnswer = entry?.value || "";
-        }
-      }
-      let input;
-      const type = (q.type || "").toLowerCase();
-      if (type.includes("oui")) {
-        input = document.createElement("div");
-        input.className = "space-x-6 text-gray-700";
-        input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-          <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
-      } else if (type.includes("menu") || type.includes("likert")) {
-        input = document.createElement("select");
-        input.name = q.id;
-        input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-        ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
-          const option = document.createElement("option");
-          option.value = opt;
-          option.textContent = opt;
-          if (opt === referenceAnswer) option.selected = true;
-          input.appendChild(option);
+        // Barre méta (priorité + actions consigne)
+        const meta = document.createElement("div");
+        meta.className = "mb-2 flex flex-wrap items-center gap-2";
+        const badge = document.createElement("span");
+        const p = q.priority || 2;
+        badge.className = `text-xs px-2 py-0.5 rounded ${PRIO[p].badge}`;
+        badge.textContent = PRIO[p].text;
+        meta.appendChild(badge);
+        const pSel = prioritySelect(p);
+        pSel.addEventListener("change", async () => {
+          try {
+            await fetch(`${apiUrl}`, {
+              method:"POST", headers:{ "Content-Type":"application/json" },
+              body: JSON.stringify({ _action:"consigne_update", id: q.id, priority: parseInt(pSel.value,10) })
+            });
+            showToast("✅ Priorité mise à jour");
+            handleSelectChange();
+          } catch(e){ showToast("❌ Erreur maj priorité", "red"); }
         });
-      } else if (type.includes("plus long")) {
-        input = document.createElement("textarea");
-        input.name = q.id;
-        input.rows = 4;
-        input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
-        input.value = referenceAnswer;
-      } else {
-        input = document.createElement("input");
-        input.name = q.id;
-        input.type = "text";
-        input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
-        input.value = referenceAnswer;
-      }
+        meta.appendChild(pSel);
+        const editBtn = document.createElement("button");
+        editBtn.type="button";
+        editBtn.className="text-sm text-blue-600 hover:underline";
+        editBtn.textContent="Éditer";
+        editBtn.addEventListener("click", () => openConsigneEditorInline(wrap, q));
+        const delBtn = document.createElement("button");
+        delBtn.type="button";
+        delBtn.className="text-sm text-red-600 hover:underline";
+        delBtn.textContent="Supprimer";
+        delBtn.addEventListener("click", async () => {
+          if (!confirm("Supprimer cette consigne ?")) return;
+          try {
+            await fetch(`${apiUrl}`, { method:"POST", headers:{ "Content-Type":"application/json" },
+              body: JSON.stringify({ _action:"consigne_delete", id: q.id }) });
+            showToast("🗑️ Consigne supprimée");
+            handleSelectChange();
+          } catch(e){ showToast("❌ Erreur suppression", "red"); }
+        });
+        const actions = document.createElement("div");
+        actions.className = "ml-auto flex items-center gap-3";
+        actions.appendChild(editBtn);
+        actions.appendChild(delBtn);
+        meta.appendChild(actions);
+        wrap.appendChild(meta);
+
+        // Réutilise la logique de rendu existante pour les champs + SR toggle + historique
+        let referenceAnswer = "";
+        if (q.history && Array.isArray(q.history)) {
+          const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
+          if (dateISO) {
+            const entry = q.history.find(entry => {
+              if (entry?.date) {
+                const [dd, mm, yyyy] = entry.date.split("/");
+                const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+                return entryDateISO === dateISO;
+              }
+              return false;
+            });
+            referenceAnswer = entry?.value || "";
+          }
+        }
+        let input;
+        const type = (q.type || "").toLowerCase();
+        if (type.includes("oui")) {
+          input = document.createElement("div");
+          input.className = "space-x-6 text-gray-700";
+          input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
+            <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
+        } else if (type.includes("menu") || type.includes("likert")) {
+          input = document.createElement("select");
+          input.name = q.id;
+          input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
+          ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
+            const option = document.createElement("option");
+            option.value = opt;
+            option.textContent = opt;
+            if (opt === referenceAnswer) option.selected = true;
+            input.appendChild(option);
+          });
+        } else if (type.includes("plus long")) {
+          input = document.createElement("textarea");
+          input.name = q.id;
+          input.rows = 4;
+          input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
+          input.value = referenceAnswer;
+        } else {
+          input = document.createElement("input");
+          input.name = q.id;
+          input.type = "text";
+          input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
+          input.value = referenceAnswer;
+        }
         wrap.appendChild(input);
-        addDelayUI(wrap, q);
+        addSROnlyUI(wrap, q);
 
         // Historique
-      if (q.history && q.history.length > 0) {
+        if (q.history && q.history.length > 0) {
           const normalize = (str) =>
             (str || "")
             .normalize("NFD")
@@ -956,52 +1105,52 @@ async function initApp() {
             .replace(/\s+/g, " ")
             .toLowerCase()
             .trim();
-        const toggleBtn = document.createElement("button");
-        toggleBtn.type = "button";
-        toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
-        toggleBtn.textContent = "📓 Voir l’historique des réponses";
-        const historyBlock = document.createElement("div");
-        historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
-        renderLikertChart(historyBlock, q.history, normalize);
-        const orderedForStats = orderForHistory(q.history);
-        const LIMIT = 10;
-        const WINDOW = 30;
-        const badge = (title, value, tone="blue") => {
-          const div = document.createElement("div");
-            const tones = { blue:"bg-blue-50 text-blue-700 border-blue-200", green:"bg-green-50 text-green-700 border-green-200", yellow:"bg-yellow-50 text-yellow-700 border-yellow-200", red:"bg-red-50 text-red-900 border-red-200", gray:"bg-gray-50 text-gray-700 border-gray-200", purple:"bg-purple-50 text-purple-700 border-purple-200" };
-          div.className = `px-2.5 py-1 rounded-full border text-xs font-medium ${tones[tone]||tones.gray}`;
-          div.innerHTML = `<span class="opacity-70">${title}:</span> <span class="font-semibold">${value}</span>`;
-          return div;
-        };
-        const POSITIVE = new Set(["oui","plutot oui"]);
-        const windowHist = orderedForStats.slice(0, WINDOW);
-        let currentStreak = 0;
-          for (const e of windowHist) { if (POSITIVE.has(normalize(e.value))) currentStreak++; else break; }
-          const counts = {}; const order = ["non","plutot non","moyen","plutot oui","oui"];
-          for (const e of windowHist) { const v = normalize(e.value); counts[v] = (counts[v] || 0) + 1; }
-          let best = null, bestCount = -1; for (const k of order) { const c = counts[k] || 0; if (c > bestCount) { best = k; bestCount = c; } }
-        const pretty = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
-          const statsWrap = document.createElement("div"); statsWrap.className = "mb-3 flex flex-wrap gap-2 items-center";
-        statsWrap.appendChild(badge("Série actuelle (positifs)", currentStreak, currentStreak>0 ? "green":"gray"));
-        if (best) statsWrap.appendChild(badge("Réponse la plus fréquente", pretty[best] || best, "purple"));
-        historyBlock.appendChild(statsWrap);
-          const colorMap = { "oui": "bg-green-100 text-green-800", "plutot oui": "bg-green-50 text-green-700", "moyen": "bg-yellow-100 text-yellow-800", "plutot non": "bg-red-100 text-red-900", "non": "bg-red-200 text-red-900", "pas de reponse": "bg-gray-200 text-gray-700 italic" };
-        orderedForStats.forEach((entry, idx) => {
-          const keyPretty = prettyKeyWithDate(entry);
-          const val = entry.value;
-          const normalized = normalize(val);
-          const entryDiv = document.createElement("div");
-            entryDiv.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
-          if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history");
-          entryDiv.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
-          historyBlock.appendChild(entryDiv);
-        });
-        if (orderedForStats.length > LIMIT) {
-            const moreBtn = document.createElement("button"); moreBtn.type = "button"; moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-            let expanded = false; const rest = orderedForStats.length - LIMIT; const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`; setLabel();
-            moreBtn.addEventListener("click", () => { expanded = !expanded; historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded)); setLabel(); });
-          historyBlock.appendChild(moreBtn);
-        }
+          const toggleBtn = document.createElement("button");
+          toggleBtn.type = "button";
+          toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
+          toggleBtn.textContent = "📓 Voir l’historique des réponses";
+          const historyBlock = document.createElement("div");
+          historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
+          renderLikertChart(historyBlock, q.history, normalize);
+          const orderedForStats = orderForHistory(q.history);
+          const LIMIT = 10;
+          const WINDOW = 30;
+          const badge = (title, value, tone="blue") => {
+            const div = document.createElement("div");
+              const tones = { blue:"bg-blue-50 text-blue-700 border-blue-200", green:"bg-green-50 text-green-700 border-green-200", yellow:"bg-yellow-50 text-yellow-700 border-yellow-200", red:"bg-red-50 text-red-900 border-red-200", gray:"bg-gray-50 text-gray-700 border-gray-200", purple:"bg-purple-50 text-purple-700 border-purple-200" };
+            div.className = `px-2.5 py-1 rounded-full border text-xs font-medium ${tones[tone]||tones.gray}`;
+            div.innerHTML = `<span class="opacity-70">${title}:</span> <span class="font-semibold">${value}</span>`;
+            return div;
+          };
+          const POSITIVE = new Set(["oui","plutot oui"]);
+          const windowHist = orderedForStats.slice(0, WINDOW);
+          let currentStreak = 0;
+            for (const e of windowHist) { if (POSITIVE.has(normalize(e.value))) currentStreak++; else break; }
+            const counts = {}; const order = ["non","plutot non","moyen","plutot oui","oui"];
+            for (const e of windowHist) { const v = normalize(e.value); counts[v] = (counts[v] || 0) + 1; }
+            let best = null, bestCount = -1; for (const k of order) { const c = counts[k] || 0; if (c > bestCount) { best = k; bestCount = c; } }
+          const pretty = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
+            const statsWrap = document.createElement("div"); statsWrap.className = "mb-3 flex flex-wrap gap-2 items-center";
+          statsWrap.appendChild(badge("Série actuelle (positifs)", currentStreak, currentStreak>0 ? "green":"gray"));
+          if (best) statsWrap.appendChild(badge("Réponse la plus fréquente", pretty[best] || best, "purple"));
+          historyBlock.appendChild(statsWrap);
+            const colorMap = { "oui": "bg-green-100 text-green-800", "plutot oui": "bg-green-50 text-green-700", "moyen": "bg-yellow-100 text-yellow-800", "plutot non": "bg-red-100 text-red-900", "non": "bg-red-200 text-red-900", "pas de reponse": "bg-gray-200 text-gray-700 italic" };
+          orderedForStats.forEach((entry, idx) => {
+            const keyPretty = prettyKeyWithDate(entry);
+            const val = entry.value;
+            const normalized = normalize(val);
+            const entryDiv = document.createElement("div");
+              entryDiv.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
+            if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history");
+            entryDiv.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
+            historyBlock.appendChild(entryDiv);
+          });
+          if (orderedForStats.length > LIMIT) {
+              const moreBtn = document.createElement("button"); moreBtn.type = "button"; moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
+              let expanded = false; const rest = orderedForStats.length - LIMIT; const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`; setLabel();
+              moreBtn.addEventListener("click", () => { expanded = !expanded; historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded)); setLabel(); });
+            historyBlock.appendChild(moreBtn);
+          }
           toggleBtn.addEventListener("click", () => { const wasHidden = historyBlock.classList.contains("hidden"); historyBlock.classList.toggle("hidden"); if (wasHidden) scrollToRight(historyBlock._likertScroller); });
           wrap.appendChild(toggleBtn);
           wrap.appendChild(historyBlock);
@@ -1013,9 +1162,9 @@ async function initApp() {
       container.appendChild(block);
     };
 
-    renderGroup(p1, { title:"Prioritaires (P1)", style:{ badge:"bg-green-100 text-green-800", card:"ring-1 ring-green-100" }});
-    renderGroup(p2, { title:"Normales (P2)",     style:{ badge:"bg-gray-100 text-gray-800",  card:"" }});
-  renderGroup(p3, { title:"Secondaires (P3)",  style:{ badge:"bg-yellow-100 text-yellow-800", card:"bg-yellow-50 bg-opacity-40" }, collapsed:true });
+    renderGroup(p1, { title:"Priorité haute",   style:{ badge:"bg-red-100 text-red-700",    card:"ring-1 ring-red-100" }});
+    renderGroup(p2, { title:"Priorité normale", style:{ badge:"bg-gray-100 text-gray-800",  card:"" }});
+    renderGroup(p3, { title:"Priorité basse",   style:{ badge:"bg-green-100 text-green-700",card:"bg-green-50 bg-opacity-40" }, collapsed:true });
 
     // === Panneau "Questions masquées (SR)" ===
     if (hiddenSR.length) {
@@ -1055,7 +1204,7 @@ async function initApp() {
           ordered.forEach((entry, idx) => {
             const keyPretty = prettyKeyWithDate(entry); const val = entry.value; const normalized = normalize(val);
             const div = document.createElement("div"); div.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
-            if (idx >= LIMIT) div.classList.add("hidden", "extra-history"); div.innerHTML = `<strong>${keyPretty}</strong> – ${val}`; historyBlock.appendChild(div);
+            if idx >= LIMIT) div.classList.add("hidden", "extra-history"); div.innerHTML = `<strong>${keyPretty}</strong> – ${val}`; historyBlock.appendChild(div);
           });
           if (ordered.length > LIMIT) {
             const moreBtn = document.createElement("button"); moreBtn.type = "button"; moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
@@ -1072,36 +1221,5 @@ async function initApp() {
       details.appendChild(list); panel.appendChild(details); container.appendChild(panel);
     }
     showFormUI(); console.log("✅ Rendu des questions terminé.");
-  }
-}
-
-async function loadOverview() {
-  try {
-    const res = await fetch(`${apiUrl}?mode=overview`);
-    const { toDo, topStreaks } = await res.json();
-    const ov = document.getElementById("overview");
-    ov.innerHTML = `
-      <div class="rounded border p-4">
-        <div class="text-sm text-gray-500">À faire aujourd’hui</div>
-        <div class="mt-1 text-3xl font-bold">${toDo.total}</div>
-      </div>
-      <div class="rounded border p-4">
-        <div class="text-sm text-gray-500">Prioritaires (P1)</div>
-        <div class="mt-1 text-3xl font-bold">${toDo.p1}</div>
-      </div>
-      <div class="rounded border p-4">
-        <div class="text-sm text-gray-500">Normales (P2) / Secondaires (P3)</div>
-        <div class="mt-1 text-3xl font-bold">${toDo.p2} / ${toDo.p3}</div>
-      </div>
-    `;
-    const top = document.getElementById("top-streaks");
-    top.innerHTML = `<div class="font-medium mb-2">🔥 Meilleures séries (positifs consécutifs)</div>` +
-      (topStreaks.length ? topStreaks.map(s =>
-        `<div class="flex items-center justify-between py-1">
-          <div class="truncate">${s.label}</div>
-          <span class="text-sm px-2 py-0.5 rounded bg-gray-200">${s.streak}</span>
-        </div>`).join("") : `<div class="text-gray-500">Aucune série</div>`);
-  } catch(e) {
-    console.error(e);
   }
 }
