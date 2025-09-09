@@ -9,6 +9,15 @@ if (!user) {
   throw new Error("Utilisateur manquant");
 }
 
+// Masquer TOUT DE SUITE les boutons (pas d'attente de initApp)
+function hideNavEarly() {
+  const kill = (id) => document.getElementById(id)?.closest("button, a, li, div")?.remove?.();
+  kill("btn-home");
+  kill("btn-manage");
+}
+hideNavEarly();
+document.addEventListener("DOMContentLoaded", hideNavEarly);
+
 (function showUserInTitle(){
   const h1 = document.getElementById("user-title");
   if (!h1 || !user) return;
@@ -58,8 +67,97 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}&ts=${Date.now()}`, { signa
   })
   .finally(() => clearTimeout(cfgTimer));
 
-async function postJSON(payload) {
-  return fetch(apiUrl, { method: "POST", body: JSON.stringify(payload) });
+async function postJSON(payload, { retries = 2, baseDelay = 400 } = {}) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      // OK -> on renvoie
+      if (res.status !== 429 && res.status !== 503) return res;
+
+      // 429/503 -> backoff et retry
+      if (attempt === retries) return res;
+      const retryAfterHeader = res.headers.get("Retry-After");
+      const retryAfterMs = Number.isFinite(parseInt(retryAfterHeader, 10))
+        ? parseInt(retryAfterHeader, 10) * 1000
+        : baseDelay * Math.pow(2, attempt);
+      await new Promise(r => setTimeout(r, retryAfterMs));
+      continue;
+    } catch (err) {
+      // Exception réseau -> backoff et retry
+      if (attempt === retries) throw err;
+      await new Promise(r => setTimeout(r, baseDelay * Math.pow(2, attempt)));
+    }
+  }
+}
+
+// helper pour éviter le double fire par consigne
+const __prioBusy = new Set();
+
+// ---- Builder du sélecteur combiné (semaine + pratique) ----
+async function buildCombinedSelect() {
+  const sel = document.getElementById("date-select");
+  if (!sel) return;
+  const prev = sel.value;           // ⬅️ mémorise
+  sel.innerHTML = "";
+
+  const today = new Date();
+  const start = new Date(today);
+  const day = start.getDay();                 // 0=dim ... 1=lun
+  const offsetToMon = (day === 0 ? -6 : 1 - day);
+  start.setDate(start.getDate() + offsetToMon);
+
+  const fmtISO = d => d.toISOString().slice(0,10);
+  const fmtFR  = d => d.toLocaleDateString("fr-FR", { weekday:"short", day:"2-digit", month:"2-digit" });
+
+  const ogWeek = document.createElement("optgroup");
+  ogWeek.label = "Semaine";
+  for (let i=0;i<7;i++){
+    const d = new Date(start); d.setDate(start.getDate()+i);
+    ogWeek.appendChild(new Option(`${fmtFR(d)}`, fmtISO(d)));
+  }
+  sel.appendChild(ogWeek);
+
+  const ogPrac = document.createElement("optgroup");
+  ogPrac.label = "Pratique délibérée";
+  try {
+    const res = await fetch(`${apiUrl}?mode=practice&ts=${Date.now()}`, { cache:"no-store" });
+    const cats = res.ok ? await res.json() : [];
+    cats.forEach(cat => ogPrac.appendChild(new Option(`Pratique — ${cat}`, `practice:${cat}`)));
+  } catch(_) {}
+  sel.appendChild(ogPrac);
+
+  const todayISO = fmtISO(today);
+  // ⬅️ si l'ancienne valeur existe encore, on la remet
+  if (Array.from(sel.options).some(o => o.value === prev)) {
+    sel.value = prev;
+  } else if (Array.from(sel.options).some(o => o.value === todayISO)) {
+    sel.value = todayISO;
+  } else {
+    sel.add(new Option(todayISO, todayISO), 0);
+    sel.value = todayISO;
+  }
+}
+
+// ---- Chargement pratique ----
+async function loadPractice(category) {
+  try {
+    __loadAbort?.abort?.();
+    __loadAbort = new AbortController();
+    const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}&ts=${Date.now()}`, { signal: __loadAbort.signal, cache:"no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const questions = await res.json();
+    window.__lastQuestions = questions;
+    renderQuestions(questions);
+  } catch(e){
+    if (e.name === "AbortError") return;
+    console.error(e);
+    showToast("❌ Erreur chargement (pratique)", "red");
+  }
 }
 
 // ---- Toast minimal (non bloquant) ----
@@ -436,8 +534,12 @@ function renderQuestions(questions) {
       const pSel = prioritySelect(p);
       pSel.addEventListener("change", async () => {
         const newP = parseInt(pSel.value, 10) || 2;
+        if (__prioBusy.has(q.id)) return;     // évite double tir
+        __prioBusy.add(q.id);
+        pSel.disabled = true;
+
         try {
-          const res = await postJSON({ _action: "consigne_update", id: q.id, priority: newP });
+          const res = await postJSON({ _action: "consigne_update", id: q.id, priority: newP }, { retries: 1 });
           const txt = await res.text().catch(() => "");
           if (!res.ok || (txt && txt.startsWith("❌"))) throw new Error(txt || `HTTP ${res.status}`);
           // maj visuelle immédiate
@@ -450,6 +552,9 @@ function renderQuestions(questions) {
         } catch (e) {
           console.error(e);
           showToast("❌ Erreur mise à jour priorité", "red");
+        } finally {
+          __prioBusy.delete(q.id);
+          pSel.disabled = false;
         }
       });
       meta.appendChild(pSel);
@@ -593,7 +698,7 @@ function renderQuestions(questions) {
           const val = entry.value;
           const normalized = normalize(val);
           const entryDiv = document.createElement("div");
-          entryDiv.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
+            entryDiv.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
           if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history");
           entryDiv.textContent = "";
           entryDiv.appendChild(strongText(keyPretty));
@@ -716,27 +821,24 @@ async function loadFormForDate(dateISO) {
 }
 function handleSelectChange() {
   const sel = document.getElementById("date-select");
-  const dateISO = sel?.value;
-  if (dateISO) loadFormForDate(dateISO);
+  const v = sel?.value || "";
+  if (!v) return;
+  if (v.startsWith("practice:")) {
+    loadPractice(v.slice("practice:".length));
+  } else {
+    loadFormForDate(v);
+  }
 }
 window.handleSelectChange = handleSelectChange;
 window.rebuildSelector = (typeof buildCombinedSelect === "function") ? buildCombinedSelect : () => {};
 
 async function initApp() {
-  // retire les boutons de la barre
-  document.getElementById("btn-home")?.closest("button, a, li, div")?.remove();
-  document.getElementById("btn-manage")?.closest("button, a, li, div")?.remove();
-  window.rebuildSelector = (typeof buildCombinedSelect === "function") ? buildCombinedSelect : () => {};
+  // déjà masqués plus haut, donc plus rien à retirer ici
+  window.rebuildSelector = buildCombinedSelect;
   const dateSelect = document.getElementById("date-select");
   if (dateSelect) {
     dateSelect.addEventListener("change", handleSelectChange);
-    const todayISO = new Date().toISOString().slice(0, 10);
-    if (!dateSelect.value) {
-      const opt = document.createElement('option');
-      opt.value = todayISO; opt.textContent = todayISO;
-      dateSelect.appendChild(opt);
-    }
-    dateSelect.value = todayISO;
+    await buildCombinedSelect();   // ⬅️ rempli semaine + pratique
     handleSelectChange();
   } else {
     const todayISO = new Date().toISOString().slice(0, 10);
@@ -750,10 +852,11 @@ document.getElementById("submitBtn")?.addEventListener("click", async (e) => {
   const btn = e.currentTarget;
   btn.disabled = true;
   try {
-    const dateISO = document.getElementById("date-select")?.value;
-    if (!dateISO) throw new Error("Date manquante");
+    const selVal = document.getElementById("date-select")?.value || "";
     const form = document.getElementById("daily-form");
-    const payload = { _date: dateISO };
+    const payload = selVal.startsWith("practice:")
+      ? { _mode:"practice", _category: selVal.slice("practice:".length) }
+      : { _date: selVal || new Date().toISOString().slice(0,10) };
 
     form.querySelectorAll("[name]").forEach(el => {
       if (el.type === "radio") {
