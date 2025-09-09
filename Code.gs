@@ -31,6 +31,15 @@ function clean(str) {
     .trim();
 }
 
+function _cors(out) {
+  return out
+    .setHeader('Access-Control-Allow-Origin', 'https://vincladef.github.io')
+    .setHeader('Access-Control-Allow-Methods', 'GET, POST')
+    .setHeader('Access-Control-Allow-Headers', 'content-type');
+}
+function json(o) { return _cors(ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON)); }
+function text(s) { return _cors(ContentService.createTextOutput(String(s)).setMimeType(ContentService.MimeType.TEXT)); }
+
 // ============================
 //  doGet — lecture
 // ============================
@@ -56,8 +65,7 @@ function doGet(e) {
       if (!label) return;
       out.push({ id, category: cat, type, frequency: freq, label, priority, rowIndex });
     });
-    return ContentService.createTextOutput(JSON.stringify(out))
-      .setMimeType(ContentService.MimeType.JSON);
+    return json(out);
   }
 
   // ---------- MODE OVERVIEW (vue globale) ----------
@@ -129,8 +137,7 @@ function doGet(e) {
       return { id: q.id, label: q.label, priority: q.priority || 2, streak: s };
     }).sort((a,b) => b.streak - a.streak).slice(0, 5);
 
-    return ContentService.createTextOutput(JSON.stringify({ toDo, topStreaks: streaks }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return json({ toDo, topStreaks: streaks });
   }
 
   // ---------- MODE PRATIQUE (itérations) ----------
@@ -152,9 +159,7 @@ function doGet(e) {
         }
       });
       const categories = Object.keys(categoriesSet);
-      return ContentService
-        .createTextOutput(JSON.stringify(categories))
-        .setMimeType(ContentService.MimeType.JSON);
+      return json(categories);
     }
 
     // b) Questions d'une catégorie
@@ -207,9 +212,7 @@ function doGet(e) {
       });
     });
 
-    return ContentService
-      .createTextOutput(JSON.stringify(out))
-      .setMimeType(ContentService.MimeType.JSON);
+    return json(out);
   }
 
   // ---------- MODE JOURNALIER (inchangé) ----------
@@ -345,9 +348,7 @@ function doGet(e) {
     }
   }
 
-  return ContentService
-    .createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
+  return json(result);
 }
 
 // ============================
@@ -359,7 +360,7 @@ function doPost(e) {
   try {
     data = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : "{}");
   } catch (err) {
-    return ContentService.createTextOutput("❌ JSON invalide").setMimeType(ContentService.MimeType.TEXT);
+    return text("❌ JSON invalide");
   }
 
   // ---------- CONSIGNES: create/update/delete ----------
@@ -384,7 +385,7 @@ function doPost(e) {
       const f = clean(data.frequency || "");
       const unit = (f.includes("pratique deliberee") || f.includes("pratique délibérée")) ? "iters" : "days";
       setSRToggle(anchor, true, unit);
-      return ContentService.createTextOutput("✅ consigne créée").setMimeType(ContentService.MimeType.TEXT);
+      return text("✅ consigne créée");
     }
 
     let rowIndex = 0;
@@ -400,12 +401,12 @@ function doPost(e) {
       if (idx >= 0) rowIndex = idx + 2;
     }
     if (!rowIndex) {
-      return ContentService.createTextOutput("❌ consigne introuvable").setMimeType(ContentService.MimeType.TEXT);
+      return text("❌ consigne introuvable");
     }
 
     if (clean(data._action) === "consigne_delete") {
       sheet.deleteRow(rowIndex);
-      return ContentService.createTextOutput("✅ consigne supprimée").setMimeType(ContentService.MimeType.TEXT);
+      return text("✅ consigne supprimée");
     }
 
     if (data.category != null) sheet.getRange(rowIndex,2).setValue(data.category);
@@ -422,14 +423,14 @@ function doPost(e) {
       setSRToggle(anchor, !!prev.on, unit);
     }
 
-    return ContentService.createTextOutput("✅ consigne mise à jour").setMimeType(ContentService.MimeType.TEXT);
+    return text("✅ consigne mise à jour");
   }
 
   // ---------- MODE PRATIQUE ----------
   if (clean(data._mode) === "practice") {
     const category = (data._category || "").toString().trim();
     if (!category) {
-      return ContentService.createTextOutput("❌ Catégorie manquante").setMimeType(ContentService.MimeType.TEXT);
+      return text("❌ Catégorie manquante");
     }
 
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -480,14 +481,14 @@ function doPost(e) {
   // ...délai manuel supprimé : SR-only
     }
 
-    return ContentService.createTextOutput("✅ Itération enregistrée !").setMimeType(ContentService.MimeType.TEXT);
+    return text("✅ Itération enregistrée !");
   }
 
   // ---------- MODE JOURNALIER (inchangé) ----------
   // ---------- MODE JOURNALIER ----------
   const selectedDate = data._date;
   if (!selectedDate) {
-    return ContentService.createTextOutput("❌ Date manquante").setMimeType(ContentService.MimeType.TEXT);
+    return text("❌ Date manquante");
   }
 
   const parsedDate = new Date(selectedDate);
@@ -547,7 +548,7 @@ function doPost(e) {
     }
   }
 
-  return ContentService.createTextOutput("✅ Données enregistrées !").setMimeType(ContentService.MimeType.TEXT);
+  return text("✅ Données enregistrées !");
 }
 
 // ============================

@@ -72,7 +72,6 @@ async function postJSON(payload, { retries = 2, baseDelay = 400 } = {}) {
     try {
       const res = await fetch(apiUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
@@ -111,7 +110,8 @@ async function buildCombinedSelect() {
   const offsetToMon = (day === 0 ? -6 : 1 - day);
   start.setDate(start.getDate() + offsetToMon);
 
-  const fmtISO = d => d.toISOString().slice(0,10);
+  const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const fmtISO = isoLocal;
   const fmtFR  = d => d.toLocaleDateString("fr-FR", { weekday:"short", day:"2-digit", month:"2-digit" });
 
   const ogWeek = document.createElement("optgroup");
@@ -365,6 +365,15 @@ function consigneEditorForm(defaults, categories){
     const opt = new Option(v, v, false, selectedFreqs.includes(v));
     freqSel.add(opt);
   });
+  // toggle sans Ctrl/Cmd :
+  freqSel.addEventListener("mousedown", (e) => {
+    if (e.target.tagName === "OPTION") {
+      e.preventDefault();
+      e.target.selected = !e.target.selected;
+      freqSel.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+  // exclusivité "Pratique délibérée"
   freqSel.addEventListener("change", () => {
     const vals = Array.from(freqSel.selectedOptions).map(o => o.value);
     if (vals.includes("Pratique délibérée") && vals.length > 1) {
@@ -429,6 +438,11 @@ function consigneEditorForm(defaults, categories){
 }
 async function openConsigneEditorInline(mountEl, qOrNull){
   document.querySelectorAll(".consigne-editor").forEach(el => el.remove());
+  const ph = document.createElement("div");
+  ph.className = "consigne-editor mt-2 p-4 rounded-lg border bg-white shadow";
+  ph.innerHTML = '<div class="animate-pulse space-y-3"><div class="h-4 bg-gray-200 rounded w-32"></div><div class="h-8 bg-gray-200 rounded"></div><div class="h-8 bg-gray-200 rounded"></div><div class="h-8 bg-gray-200 rounded"></div></div>';
+  mountEl.appendChild(ph);
+
   const cats = await getAllCategories();
   const isUpdate = !!qOrNull?.id;
   const form = consigneEditorForm(
@@ -438,7 +452,7 @@ async function openConsigneEditorInline(mountEl, qOrNull){
     } : {},
     cats
   );
-  mountEl.appendChild(form);
+  ph.replaceWith(form);
   setTimeout(() => form.querySelector(".ce-label")?.focus(), 0);
 }
 
@@ -475,7 +489,13 @@ function renderQuestions(questions) {
   addBar.appendChild(addBtn);
   addBar.appendChild(addMount);
   addBtn.addEventListener("click", () => {
-    openConsigneEditorInline(addMount, null);
+    const prevHTML = addBtn.innerHTML;
+    addBtn.disabled = true;
+    addBtn.innerHTML = '<span class="inline-block animate-spin mr-2 border-2 border-gray-300 border-t-transparent rounded-full w-4 h-4 align-[-2px]"></span>Chargement...';
+    openConsigneEditorInline(addMount, null).finally(() => {
+      addBtn.disabled = false;
+      addBtn.innerHTML = prevHTML;
+    });
     addMount.scrollIntoView({ behavior: "smooth", block: "center" });
   });
   container.appendChild(addBar);
