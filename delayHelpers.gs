@@ -386,3 +386,52 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
 
   return null;
 }
+
+/** ---------- PRIORITY & ROW ID TAGS ---------- 
+ * [priority:1]  // 1 (haut), 2 (normal), 3 (secondaire)
+ * [id:550e8400-e29b-41d4-a716-446655440000] // uuid stable par ligne
+ */
+function _readSimpleTag(note, key) {
+  if (!note) return null;
+  const re = new RegExp(String.raw`^\s*\[${key}:(.+?)\]\s*$`);
+  const lines = note.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = lines[i].trim().match(re);
+    if (m) return m[1];
+  }
+  return null;
+}
+function _stripSimpleTag(note, key) {
+  if (!note) return "";
+  const re = new RegExp(String.raw`^\s*\[${key}:.+?\]\s*$`);
+  return note.split('\n').filter(l => !re.test(l.trim())).join('\n').trim();
+}
+function _writeSimpleTag(range, key, value) {
+  const cleaned = _stripSimpleTag(range.getNote(), key);
+  const tag = `[${key}:${value}]`;
+  range.setNote([cleaned, tag].filter(Boolean).join('\n').trim());
+}
+
+/** Priorité : 1..3 (défaut 2) */
+function getPriority(anchorRange) {
+  const p = parseInt(_readSimpleTag(anchorRange.getNote(), 'priority'), 10);
+  return (p === 1 || p === 2 || p === 3) ? p : 2;
+}
+function setPriority(anchorRange, p) {
+  p = (p === 1 || p === 2 || p === 3) ? p : 2;
+  _writeSimpleTag(anchorRange, 'priority', String(p));
+  return p;
+}
+
+/** ID de ligne stable (uuid), stocké en note d'ancre */
+function ensureRowId(anchorRange) {
+  let id = _readSimpleTag(anchorRange.getNote(), 'id');
+  if (!id) {
+    id = Utilities.getUuid();
+    _writeSimpleTag(anchorRange, 'id', id);
+  }
+  return id;
+}
+function getRowId(anchorRange) {
+  return _readSimpleTag(anchorRange.getNote(), 'id');
+}

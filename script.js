@@ -74,6 +74,16 @@ async function initApp() {
   // Titre dynamique
   document.getElementById("user-title").textContent =
     `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
+  // --- Navigation Accueil / Formulaires
+  const homeView = document.getElementById("home-view");
+  const formsView = document.getElementById("forms-view");
+  if (document.getElementById("btn-home")) {
+    document.getElementById("btn-home").addEventListener("click", () => {
+      homeView.classList.remove("hidden");
+      formsView.classList.add("hidden");
+      loadOverview();
+    });
+  }
 
   // On enlève l’ancien affichage de date (non nécessaire avec le sélecteur)
   const dateDisplay = document.getElementById("date-display");
@@ -205,9 +215,14 @@ async function initApp() {
     const mode = selected.dataset.mode || "daily";
     if (mode === "daily") {
       console.log(`➡️ Changement de mode : Journalier, date=${selected.dataset.date}`);
+      // afficher la vue formulaires si on était sur Accueil
+      const hv = document.getElementById("home-view"); const fv = document.getElementById("forms-view");
+      if (hv && fv) { hv.classList.add("hidden"); fv.classList.remove("hidden"); }
       loadFormForDate(selected.dataset.date);
     } else {
       console.log(`➡️ Changement de mode : Pratique, catégorie=${selected.dataset.category}`);
+      const hv = document.getElementById("home-view"); const fv = document.getElementById("forms-view");
+      if (hv && fv) { hv.classList.add("hidden"); fv.classList.remove("hidden"); }
       loadPracticeForm(selected.dataset.category);
     }
   }
@@ -302,6 +317,95 @@ async function initApp() {
         btn.innerHTML = btnPrev;
       });
   });
+  // --- Modal Consignes
+  const modal = document.getElementById("consignes-modal");
+  const btnManage = document.getElementById("btn-manage");
+  const btnCloseM = document.getElementById("close-consignes");
+  const btnAdd = document.getElementById("add-consigne");
+  if (btnManage && modal) btnManage.addEventListener("click", () => { modal.classList.remove("hidden"); loadConsignes(); });
+  if (btnCloseM && modal) btnCloseM.addEventListener("click", () => modal.classList.add("hidden"));
+  if (btnAdd) btnAdd.addEventListener("click", (e) => { e.preventDefault(); renderConsigneEditor(); });
+
+  async function loadConsignes() {
+    const list = document.getElementById("consignes-list");
+    list.innerHTML = `<div class="py-6 text-center text-gray-500">Chargement…</div>`;
+    try {
+      const res = await fetch(`${apiUrl}?mode=consignes`);
+      const consignes = await res.json();
+      list.innerHTML = consignes.map(c => consigneRow(c)).join("");
+      attachConsigneRowEvents(consignes);
+    } catch(e) {
+      list.innerHTML = `<div class="py-6 text-center text-red-600">Erreur de chargement</div>`;
+    }
+  }
+  function consigneRow(c){
+    const badge = c.priority===1 ? 'bg-green-100 text-green-800' : c.priority===2 ? 'bg-gray-100 text-gray-800' : 'bg-yellow-100 text-yellow-800';
+    return `
+      <div class="py-3 flex items-center justify-between">
+        <div class="min-w-0">
+          <div class="font-medium truncate">${c.label}</div>
+          <div class="text-sm text-gray-500 truncate">${c.category} • ${c.type} • ${c.frequency}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs px-2 py-0.5 rounded ${badge}">P${c.priority||2}</span>
+          <button class="edit px-2 py-1 text-sm rounded bg-blue-600 text-white" data-id="${c.id}">Éditer</button>
+          <button class="del px-2 py-1 text-sm rounded bg-red-600 text-white" data-id="${c.id}">Suppr.</button>
+        </div>
+      </div>`;
+  }
+  function attachConsigneRowEvents(all){
+    const byId = Object.fromEntries(all.map(x=>[x.id,x]));
+    document.querySelectorAll("#consignes-list .edit").forEach(b=>{
+      b.addEventListener("click", ()=> renderConsigneEditor(byId[b.dataset.id]));
+    });
+    document.querySelectorAll("#consignes-list .del").forEach(b=>{
+      b.addEventListener("click", async ()=>{
+        if (!confirm("Supprimer cette consigne ?")) return;
+        await fetch(`${apiUrl}`, { method:"POST", headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ _action:"consigne_delete", id: b.dataset.id }) });
+        loadConsignes();
+      });
+    });
+  }
+  function renderConsigneEditor(item){
+    const list = document.getElementById("consignes-list");
+    const c = item || { category:"", type:"", frequency:"", label:"", priority:2 };
+    const html = `
+      <div class="border rounded p-3 mb-3">
+        <div class="grid md:grid-cols-2 gap-2">
+          <input id="ce-cat" class="border rounded px-2 py-1" placeholder="Catégorie" value="${c.category||""}">
+          <input id="ce-type" class="border rounded px-2 py-1" placeholder="Type (Oui/Non, Likert, Texte…)" value="${c.type||""}">
+          <input id="ce-freq" class="border rounded px-2 py-1" placeholder="Fréquence (quotidien, mardi, repetition espacée, pratique délibérée…)" value="${c.frequency||""}">
+          <select id="ce-pri" class="border rounded px-2 py-1">
+            <option value="1" ${c.priority===1?"selected":""}>Prioritaire (P1)</option>
+            <option value="2" ${!c.priority||c.priority===2?"selected":""}>Normale (P2)</option>
+            <option value="3" ${c.priority===3?"selected":""}>Secondaire (P3)</option>
+          </select>
+        </div>
+        <input id="ce-label" class="border rounded px-2 py-1 w-full mt-2" placeholder="Intitulé" value="${c.label||""}">
+        <div class="mt-2 flex gap-2">
+          <button id="ce-save" class="px-3 py-1 rounded bg-green-600 text-white">Enregistrer</button>
+          <button id="ce-cancel" class="px-3 py-1 rounded bg-gray-100">Annuler</button>
+        </div>
+      </div>`;
+    list.insertAdjacentHTML("afterbegin", html);
+    document.getElementById("ce-cancel").addEventListener("click", loadConsignes);
+    document.getElementById("ce-save").addEventListener("click", async ()=>{
+      const payload = {
+        _action: item ? "consigne_update" : "consigne_create",
+        id: item?.id,
+        category: document.getElementById("ce-cat").value,
+        type: document.getElementById("ce-type").value,
+        frequency: document.getElementById("ce-freq").value,
+        priority: parseInt(document.getElementById("ce-pri").value,10),
+        label: item ? undefined : document.getElementById("ce-label").value,
+        newLabel: item ? document.getElementById("ce-label").value : undefined
+      };
+      await fetch(`${apiUrl}`, { method:"POST", headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      loadConsignes();
+      buildCombinedSelect().catch(()=>{});
+    });
+  }
 
   // =========================
   //   Chargements / Renders
@@ -746,50 +850,46 @@ async function initApp() {
     container.innerHTML = "";
     console.log(`✍️ Rendu de ${questions.length} question(s)`);
 
-    const hiddenSR = []; // questions masquées par SR/delay
-    const normalize = (str) =>
-      (str || "")
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .replace(/[\u00A0\u202F\u200B]/g, " ")
-      .replace(/\s+/g, " ")
-      .toLowerCase()
-      .trim();
+    const visible = [], hiddenSR = [];
+    (questions||[]).forEach(q => (q.skipped ? hiddenSR : visible).push(q));
 
-    const colorMap = {
-      "oui": "bg-green-100 text-green-800",
-      "plutot oui": "bg-green-50 text-green-700",
-      "moyen": "bg-yellow-100 text-yellow-800",
-      "plutot non": "bg-red-100 text-red-900",
-      "non": "bg-red-200 text-red-900",
-      "pas de reponse": "bg-gray-200 text-gray-700 italic"
-    };
+    // TRI : P1 -> P2 -> P3
+    visible.sort((a,b)=> (a.priority||2)-(b.priority||2));
 
-    (questions || []).forEach(q => {
-      // Log détaillé pour chaque question
-      console.groupCollapsed(`[Question] Traitement de "${q.label}"`);
-      console.log("-> Type de question :", q.type);
-      console.log("-> Est-elle affichée ? :", !q.skipped);
-      if (q.skipped) {
-        console.log("-> Raison du masquage :", q.reason);
+    // Groupes
+    const p1 = visible.filter(q => (q.priority||2) === 1);
+    const p2 = visible.filter(q => (q.priority||2) === 2);
+    const p3 = visible.filter(q => (q.priority||2) === 3);
+
+    const renderGroup = (arr, {title, style, collapsed}) => {
+      if (!arr.length) return;
+      const block = document.createElement("div");
+      block.className = "mb-6";
+      const header = document.createElement("div");
+      header.className = "mb-3 flex items-center gap-2";
+      header.innerHTML = `<span class="text-sm font-semibold ${style.badge} px-2 py-0.5 rounded">${title}</span>`;
+      block.appendChild(header);
+
+      const body = document.createElement(collapsed ? "details" : "div");
+      if (collapsed) {
+        body.className = "rounded border";
+        const sum = document.createElement("summary");
+        sum.className = "cursor-pointer select-none px-3 py-2 text-gray-800";
+        sum.textContent = "Afficher les consignes secondaires";
+        body.appendChild(sum);
       }
-      console.groupEnd();
-      
-      if (q.skipped) {
-        // on garde tout (history, scheduleInfo…) pour pouvoir afficher délai + historique
-        hiddenSR.push(q);
-        return;
-      }
-      
-      const wrapper = document.createElement("div");
-      wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
+
+      arr.forEach(q => {
+        const wrap = document.createElement("div");
+        wrap.className = `mb-4 p-4 rounded-lg shadow-sm ${style.card}`;
 
       const label = document.createElement("label");
       label.className = "block text-lg font-semibold mb-2";
       label.textContent = q.label;
-      wrapper.appendChild(label);
+        wrap.appendChild(label);
 
-      // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
+        // Réutilise la logique de rendu existante pour les champs + délai + historique
+        // Pré-remplissage (journalier)
       let referenceAnswer = "";
       if (q.history && Array.isArray(q.history)) {
         const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
@@ -807,7 +907,6 @@ async function initApp() {
       }
       let input;
       const type = (q.type || "").toLowerCase();
-
       if (type.includes("oui")) {
         input = document.createElement("div");
         input.className = "space-x-6 text-gray-700";
@@ -828,7 +927,6 @@ async function initApp() {
         input = document.createElement("textarea");
         input.name = q.id;
         input.rows = 4;
-        // sm = mobile ; md = ≥768px
         input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
         input.value = referenceAnswer;
       } else {
@@ -838,126 +936,87 @@ async function initApp() {
         input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
         input.value = referenceAnswer;
       }
+        wrap.appendChild(input);
+        addDelayUI(wrap, q);
 
-      wrapper.appendChild(input);
-      addDelayUI(wrapper, q); // Appel du nouveau helper ici
-    
-      // 📓 Historique (compatible daily et practice)
+        // Historique
       if (q.history && q.history.length > 0) {
-        console.log(`📖 Affichage de l'historique pour "${q.label}" (${q.history.length} entrées)`);
+          const normalize = (str) =>
+            (str || "")
+            .normalize("NFD")
+            .replace(/[̀-ͯ]/g, "")
+            .replace(/[\u00A0\u202F\u200B]/g, " ")
+            .replace(/\s+/g, " ")
+            .toLowerCase()
+            .trim();
         const toggleBtn = document.createElement("button");
         toggleBtn.type = "button";
         toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
         toggleBtn.textContent = "📓 Voir l’historique des réponses";
-
         const historyBlock = document.createElement("div");
         historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
-
-        // Graphe Likert + 2 stats compactes (sur 30 dernières)
         renderLikertChart(historyBlock, q.history, normalize);
-
-        // --- Tri commun pour stats & liste : RÉCENT -> ANCIEN ---
         const orderedForStats = orderForHistory(q.history);
-
-        // --- Stats compactes sur fenêtre récente ---
         const LIMIT = 10;
         const WINDOW = 30;
         const badge = (title, value, tone="blue") => {
           const div = document.createElement("div");
-          const tones = {
-            blue:"bg-blue-50 text-blue-700 border-blue-200",
-            green:"bg-green-50 text-green-700 border-green-200",
-            yellow:"bg-yellow-50 text-yellow-700 border-yellow-200",
-            red:"bg-red-50 text-red-900 border-red-200",
-            gray:"bg-gray-50 text-gray-700 border-gray-200",
-            purple:"bg-purple-50 text-purple-700 border-purple-200"
-          };
+            const tones = { blue:"bg-blue-50 text-blue-700 border-blue-200", green:"bg-green-50 text-green-700 border-green-200", yellow:"bg-yellow-50 text-yellow-700 border-yellow-200", red:"bg-red-50 text-red-900 border-red-200", gray:"bg-gray-50 text-gray-700 border-gray-200", purple:"bg-purple-50 text-purple-700 border-purple-200" };
           div.className = `px-2.5 py-1 rounded-full border text-xs font-medium ${tones[tone]||tones.gray}`;
           div.innerHTML = `<span class="opacity-70">${title}:</span> <span class="font-semibold">${value}</span>`;
           return div;
         };
         const POSITIVE = new Set(["oui","plutot oui"]);
-
-        // Fenêtre des N plus récents
         const windowHist = orderedForStats.slice(0, WINDOW);
-
-        // Série courante (positifs consécutifs depuis le plus récent)
         let currentStreak = 0;
-        for (const e of windowHist) {
-          if (POSITIVE.has(normalize(e.value))) currentStreak++;
-          else break;
-        }
-
-        // Réponse la plus fréquente (dans la fenêtre)
-        const counts = {};
-        const order = ["non","plutot non","moyen","plutot oui","oui"];
-        for (const e of windowHist) {
-          const v = normalize(e.value);
-          counts[v] = (counts[v] || 0) + 1;
-        }
-        let best = null, bestCount = -1;
-        for (const k of order) {
-          const c = counts[k] || 0;
-          if (c > bestCount) { best = k; bestCount = c; }
-        }
+          for (const e of windowHist) { if (POSITIVE.has(normalize(e.value))) currentStreak++; else break; }
+          const counts = {}; const order = ["non","plutot non","moyen","plutot oui","oui"];
+          for (const e of windowHist) { const v = normalize(e.value); counts[v] = (counts[v] || 0) + 1; }
+          let best = null, bestCount = -1; for (const k of order) { const c = counts[k] || 0; if (c > bestCount) { best = k; bestCount = c; } }
         const pretty = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
-        const statsWrap = document.createElement("div");
-        statsWrap.className = "mb-3 flex flex-wrap gap-2 items-center";
+          const statsWrap = document.createElement("div"); statsWrap.className = "mb-3 flex flex-wrap gap-2 items-center";
         statsWrap.appendChild(badge("Série actuelle (positifs)", currentStreak, currentStreak>0 ? "green":"gray"));
         if (best) statsWrap.appendChild(badge("Réponse la plus fréquente", pretty[best] || best, "purple"));
         historyBlock.appendChild(statsWrap);
-
-        // --- Liste : utilise le même ordre trié (récent -> ancien) ---
+          const colorMap = { "oui": "bg-green-100 text-green-800", "plutot oui": "bg-green-50 text-green-700", "moyen": "bg-yellow-100 text-yellow-800", "plutot non": "bg-red-100 text-red-900", "non": "bg-red-200 text-red-900", "pas de reponse": "bg-gray-200 text-gray-700 italic" };
         orderedForStats.forEach((entry, idx) => {
           const keyPretty = prettyKeyWithDate(entry);
           const val = entry.value;
           const normalized = normalize(val);
-          const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
-
           const entryDiv = document.createElement("div");
-          entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
+            entryDiv.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
           if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history");
           entryDiv.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
           historyBlock.appendChild(entryDiv);
         });
-
         if (orderedForStats.length > LIMIT) {
-          const moreBtn = document.createElement("button");
-          moreBtn.type = "button";
-          moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-          let expanded = false; const rest = orderedForStats.length - LIMIT;
-          const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
-          setLabel();
-          moreBtn.addEventListener("click", () => {
-            expanded = !expanded;
-            historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
-            setLabel();
-          });
+            const moreBtn = document.createElement("button"); moreBtn.type = "button"; moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
+            let expanded = false; const rest = orderedForStats.length - LIMIT; const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`; setLabel();
+            moreBtn.addEventListener("click", () => { expanded = !expanded; historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded)); setLabel(); });
           historyBlock.appendChild(moreBtn);
         }
+          toggleBtn.addEventListener("click", () => { const wasHidden = historyBlock.classList.contains("hidden"); historyBlock.classList.toggle("hidden"); if (wasHidden) scrollToRight(historyBlock._likertScroller); });
+          wrap.appendChild(toggleBtn);
+          wrap.appendChild(historyBlock);
+        }
+        body.appendChild(wrap);
+      });
 
-        toggleBtn.addEventListener("click", () => {
-          const wasHidden = historyBlock.classList.contains("hidden");
-          historyBlock.classList.toggle("hidden");
-          if (wasHidden) scrollToRight(historyBlock._likertScroller);
-        });
+      block.appendChild(body);
+      container.appendChild(block);
+    };
 
-        wrapper.appendChild(toggleBtn);
-        wrapper.appendChild(historyBlock);
-      }
-
-      container.appendChild(wrapper);
-    });
+    renderGroup(p1, { title:"Prioritaires (P1)", style:{ badge:"bg-green-100 text-green-800", card:"ring-1 ring-green-100" }});
+    renderGroup(p2, { title:"Normales (P2)",     style:{ badge:"bg-gray-100 text-gray-800",  card:"" }});
+  renderGroup(p3, { title:"Secondaires (P3)",  style:{ badge:"bg-yellow-100 text-yellow-800", card:"bg-yellow-50 bg-opacity-40" }, collapsed:true });
 
     // === Panneau "Questions masquées (SR)" ===
     if (hiddenSR.length) {
       const panel = document.createElement("div");
       panel.className = "mt-6";
-
       const details = document.createElement("details");
       details.className = "bg-gray-50 border border-gray-200 rounded-lg";
-      details.open = false; // toujours replié par défaut
-
+      details.open = false;
       const summary = document.createElement("summary");
       summary.className = "cursor-pointer select-none px-4 py-2 font-medium text-gray-800 flex items-center justify-between";
       summary.innerHTML = `
@@ -965,139 +1024,77 @@ async function initApp() {
         <span class="text-sm text-gray-500">voir</span>
       `;
       details.appendChild(summary);
-
       const list = document.createElement("div");
       list.className = "px-4 pt-2 pb-3";
-
-      const normalize = (str) =>
-        (str || "")
-          .normalize("NFD").replace(/[̀-ͯ]/g, "")
-          .replace(/[\u00A0\u202F\u200B]/g, " ")
-          .replace(/\s+/g, " ")
-          .toLowerCase()
-          .trim();
-
+      const normalize = (str) => (str || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[\u00A0\u202F\u200B]/g, " ").replace(/\s+/g, " ").toLowerCase().trim();
       hiddenSR.forEach(item => {
-        const row = document.createElement("div");
-        row.className = "mb-2 rounded bg-white border border-gray-200";
-
-        // en-tête de l'item
-        const head = document.createElement("div");
-        head.className = "px-3 py-2 flex items-center justify-between";
-        const title = document.createElement("div");
-        title.innerHTML = `<strong>${item.label}</strong>`;
-        head.appendChild(title);
-
-        // r: toggle sur tout le header
+        const row = document.createElement("div"); row.className = "mb-2 rounded bg-white border border-gray-200";
+        const head = document.createElement("div"); head.className = "px-3 py-2 flex items-center justify-between";
+        const title = document.createElement("div"); title.innerHTML = `<strong>${item.label}</strong>`; head.appendChild(title);
         head.classList.add("cursor-pointer");
-        head.addEventListener("click", () => {
-          const wasHidden = content.classList.contains("hidden");
-          content.classList.toggle("hidden");
-          if (wasHidden) {
-            const sc = content.querySelector('[data-autoscroll="right"]');
-            scrollToRight(sc);
-          }
-        });
-
-        // infos "prochaine échéance"
-        const sub = document.createElement("div");
-        sub.className = "px-3 pb-2 text-sm text-gray-700 flex items-center gap-2";
-        const extras = [];
-        if (item.scheduleInfo?.nextDate) extras.push(`Prochaine : ${item.scheduleInfo.nextDate}`);
-        if (Number(item.scheduleInfo?.remaining) > 0) extras.push(`Restant : ${item.scheduleInfo.remaining} itér.`);
-        const tail = extras.length ? ` (${extras.join(" — ")})` : "";
-        const reason = item.reason || "Répétition espacée";
-        sub.innerHTML = `⏱️ ${reason.replace(/^✅\s*/, '')}${tail}`;
-
-        // contenu détaillé replié
-        const content = document.createElement("div");
-        content.className = "px-3 pb-3 hidden";
-
-        // 1) UI Délai (mêmes options que pour les visibles)
-        const delayWrap = document.createElement("div");
-        addDelayUI(delayWrap, item);
-        content.appendChild(delayWrap);
-
-        // 2) Historique (même principe : bouton + bloc avec graphe + liste)
+        head.addEventListener("click", () => { const wasHidden = content.classList.contains("hidden"); content.classList.toggle("hidden"); if (wasHidden) { const sc = content.querySelector('[data-autoscroll="right"]'); scrollToRight(sc); } });
+        const sub = document.createElement("div"); sub.className = "px-3 pb-2 text-sm text-gray-700 flex items-center gap-2";
+        const extras = []; if (item.scheduleInfo?.nextDate) extras.push(`Prochaine : ${item.scheduleInfo.nextDate}`); if (Number(item.scheduleInfo?.remaining) > 0) extras.push(`Restant : ${item.scheduleInfo.remaining} itér.`);
+        const tail = extras.length ? ` (${extras.join(" — ")})` : ""; const reason = item.reason || "Répétition espacée"; sub.innerHTML = `⏱️ ${reason.replace(/^✅\s*/, '')}${tail}`;
+        const content = document.createElement("div"); content.className = "px-3 pb-3 hidden";
+        const delayWrap = document.createElement("div"); addDelayUI(delayWrap, item); content.appendChild(delayWrap);
         if (item.history && item.history.length > 0) {
-          const toggleBtn = document.createElement("button");
-          toggleBtn.type = "button";
-          toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
-          toggleBtn.textContent = "📓 Voir l’historique des réponses";
-
-          const historyBlock = document.createElement("div");
-          historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
-
-          // graphe likert
+          const toggleBtn = document.createElement("button"); toggleBtn.type = "button"; toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline"; toggleBtn.textContent = "📓 Voir l’historique des réponses";
+          const historyBlock = document.createElement("div"); historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
           renderLikertChart(historyBlock, item.history, normalize);
-
-          // liste (RÉCENTS -> ANCIENS)
           const ordered = orderForHistory(item.history);
-
-          const colorMap = {
-            "oui": "bg-green-100 text-green-800",
-            "plutot oui": "bg-green-50 text-green-700",
-            "moyen": "bg-yellow-100 text-yellow-800",
-            "plutot non": "bg-red-100 text-red-900",
-            "non": "bg-red-200 text-red-900",
-            "pas de reponse": "bg-gray-200 text-gray-700 italic"
-          };
-
+          const colorMap = { "oui": "bg-green-100 text-green-800", "plutot oui": "bg-green-50 text-green-700", "moyen": "bg-yellow-100 text-yellow-800", "plutot non": "bg-red-100 text-red-900", "non": "bg-red-200 text-red-900", "pas de reponse": "bg-gray-200 text-gray-700 italic" };
           const LIMIT = 10;
           ordered.forEach((entry, idx) => {
-            const keyPretty = prettyKeyWithDate(entry);
-            const val = entry.value;
-            const normalized = normalize(val);
-            const div = document.createElement("div");
-            div.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
-            if (idx >= LIMIT) div.classList.add("hidden", "extra-history");
-            div.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
-            historyBlock.appendChild(div);
+            const keyPretty = prettyKeyWithDate(entry); const val = entry.value; const normalized = normalize(val);
+            const div = document.createElement("div"); div.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
+            if (idx >= LIMIT) div.classList.add("hidden", "extra-history"); div.innerHTML = `<strong>${keyPretty}</strong> – ${val}`; historyBlock.appendChild(div);
           });
-
           if (ordered.length > LIMIT) {
-            const moreBtn = document.createElement("button");
-            moreBtn.type = "button";
-            moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-            let expanded = false; const rest = ordered.length - LIMIT;
-            const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
-            setLabel();
-            moreBtn.addEventListener("click", () => {
-              expanded = !expanded;
-              historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
-              setLabel();
-            });
+            const moreBtn = document.createElement("button"); moreBtn.type = "button"; moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
+            let expanded = false; const rest = ordered.length - LIMIT; const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`; setLabel();
+            moreBtn.addEventListener("click", () => { expanded = !expanded; historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded)); setLabel(); });
             historyBlock.appendChild(moreBtn);
           }
-
-          toggleBtn.addEventListener("click", () => {
-            const wasHidden = historyBlock.classList.contains("hidden");
-            historyBlock.classList.toggle("hidden");
-            if (wasHidden) scrollToRight(historyBlock._likertScroller);
-          });
-
-          content.appendChild(toggleBtn);
-          content.appendChild(historyBlock);
+          toggleBtn.addEventListener("click", () => { const wasHidden = historyBlock.classList.contains("hidden"); historyBlock.classList.toggle("hidden"); if (wasHidden) scrollToRight(historyBlock._likertScroller); });
+          content.appendChild(toggleBtn); content.appendChild(historyBlock);
         }
-
-        // toggle du volet de l'item: supprimé (on clique sur l'entête)
-
-        row.appendChild(head);
-        row.appendChild(sub);
-        row.appendChild(content);
-        list.appendChild(row);
+        row.appendChild(head); row.appendChild(sub); row.appendChild(content); list.appendChild(row);
       });
-
-      const note = document.createElement("p");
-      note.className = "mt-2 text-xs text-gray-500";
-      note.textContent = "Ces items sont masqués automatiquement suite à vos réponses positives. Ils réapparaîtront à l’échéance.";
-      list.appendChild(note);
-
-      details.appendChild(list);
-      panel.appendChild(details);
-      container.appendChild(panel);
+      const note = document.createElement("p"); note.className = "mt-2 text-xs text-gray-500"; note.textContent = "Ces items sont masqués automatiquement suite à vos réponses positives. Ils réapparaîtront à l’échéance."; list.appendChild(note);
+      details.appendChild(list); panel.appendChild(details); container.appendChild(panel);
     }
-    showFormUI();
-    console.log("✅ Rendu des questions terminé.");
+    showFormUI(); console.log("✅ Rendu des questions terminé.");
+  }
+}
+
+async function loadOverview() {
+  try {
+    const res = await fetch(`${apiUrl}?mode=overview`);
+    const { toDo, topStreaks } = await res.json();
+    const ov = document.getElementById("overview");
+    ov.innerHTML = `
+      <div class="rounded border p-4">
+        <div class="text-sm text-gray-500">À faire aujourd’hui</div>
+        <div class="mt-1 text-3xl font-bold">${toDo.total}</div>
+      </div>
+      <div class="rounded border p-4">
+        <div class="text-sm text-gray-500">Prioritaires (P1)</div>
+        <div class="mt-1 text-3xl font-bold">${toDo.p1}</div>
+      </div>
+      <div class="rounded border p-4">
+        <div class="text-sm text-gray-500">Normales (P2) / Secondaires (P3)</div>
+        <div class="mt-1 text-3xl font-bold">${toDo.p2} / ${toDo.p3}</div>
+      </div>
+    `;
+    const top = document.getElementById("top-streaks");
+    top.innerHTML = `<div class="font-medium mb-2">🔥 Meilleures séries (positifs consécutifs)</div>` +
+      (topStreaks.length ? topStreaks.map(s =>
+        `<div class="flex items-center justify-between py-1">
+          <div class="truncate">${s.label}</div>
+          <span class="text-sm px-2 py-0.5 rounded bg-gray-200">${s.streak}</span>
+        </div>`).join("") : `<div class="text-gray-500">Aucune série</div>`);
+  } catch(e) {
+    console.error(e);
   }
 }
