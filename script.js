@@ -158,7 +158,7 @@ async function initApp() {
     console.log("✅ Sélecteur de mode et de date prêt.");
   }
 
-  // Ordonne l'historique pour l'affichage en liste: RÉCENT -> ANCIEN
+  // Ordonne l'historique pour l'affichage en liste: du plus récent au plus ancien
   function orderForHistory(hist) {
     const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
     const iterRe = /\b(\d+)\s*\(/;
@@ -794,8 +794,15 @@ async function initApp() {
     pop.appendChild(srRow);
     const srLabel = document.createElement("span");
     srLabel.className = "text-xs text-gray-700";
-    srLabel.innerHTML = `Répétition espacée : <strong>${window.__srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>` +
-      (srCurrent.on && srCurrent.interval ? ` <span class="text-gray-500">(${srCurrent.unit==="iters" ? srCurrent.interval+" itér." : srCurrent.due ? "due "+srCurrent.due : srCurrent.interval+" j"})</span>` : "");
+    let srInfo = "";
+    if (srCurrent.on) {
+      if (srCurrent.interval === 0) {
+        srInfo = " <span class=\"text-gray-500\">(aucune échéance)</span>";
+      } else if (srCurrent.interval) {
+        srInfo = ` <span class=\"text-gray-500\">(${srCurrent.unit==="iters" ? srCurrent.interval+" itér." : srCurrent.due ? "due "+srCurrent.due : srCurrent.interval+" j"})</span>`;
+      }
+    }
+    srLabel.innerHTML = `Répétition espacée : <strong>${window.__srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>${srInfo}`;
     srRow.appendChild(srLabel);
     const srBtn = document.createElement("button");
     srBtn.type = "button";

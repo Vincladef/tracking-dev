@@ -58,6 +58,8 @@ function doGet(e) {
   if (clean(e?.parameter?.mode) === "overview") {
   const todayISO = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
     const dailyResp = JSON.parse(doGet({ parameter: { date: todayISO } }).getContent());
+
+    // Compteurs P1/P2/P3/total (hors items masqués)
     const toDo = { p1:0, p2:0, p3:0, total:0 };
     dailyResp.forEach(q => {
       const p = q.priority || 2;
@@ -69,14 +71,29 @@ function doGet(e) {
       }
     });
 
+    // Top streaks: tri fiable par date réelle (et pas par colIndex)
     function norm(v){ return clean(v); }
-  const POS = new Set(["oui","plutot oui"]);
+    const POS = new Set(["oui","plutot oui"]);
+    const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+    const dateOf = (h) => {
+      const s = String(h?.date || h?.key || "");
+      const m = s.match(dateRe);
+      return m ? new Date(`${m[3]}-${m[2]}-${m[1]}`) : null;
+    };
+
     const streaks = dailyResp.map(q => {
-      const ord = (q.history||[]).slice().sort((a,b)=> (b.colIndex||0)-(a.colIndex||0));
-      let s=0;
-      for (const e of ord) { if (POS.has(norm(e.value))) s++; else break; }
-      return { id:q.id, label:q.label, priority:q.priority||2, streak:s };
-    }).sort((a,b)=> b.streak-a.streak).slice(0,5);
+      const ord = (q.history || [])
+        .map(h => ({ h, d: dateOf(h) }))
+        .filter(x => x.d)                 // garde seulement les entrées datées
+        .sort((a,b) => b.d - a.d)         // récent → ancien
+        .map(x => x.h);
+
+      let s = 0;
+      for (const e of ord) {
+        if (POS.has(norm(e.value))) s++; else break;
+      }
+      return { id: q.id, label: q.label, priority: q.priority || 2, streak: s };
+    }).sort((a,b) => b.streak - a.streak).slice(0, 5);
 
     return ContentService.createTextOutput(JSON.stringify({ toDo, topStreaks: streaks }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -174,17 +191,16 @@ function doGet(e) {
     let totalScore = 0;
     let lastDate = null;
     for (let col = headers.length - 1; col >= 5; col--) {
+      const header = String(headers[col] || "");
+      if (!/^\d{2}\/\d{2}\/\d{4}$/.test(header)) continue; // <- ignorer non-dates
+
       const answer = clean(row[col]);
       if (!answer) continue;
-      const score = ANSWER_VALUES[answer] ?? 0;
-      totalScore += score;
+      totalScore += (ANSWER_VALUES[answer] ?? 0);
 
-      const dateStr = headers[col];
-      const [d, m, y] = (dateStr || "").split("/");
-      if (d && m && y) {
-        const dObj = new Date(`${y}-${m}-${d}`);
-        if (!lastDate || dObj > lastDate) lastDate = dObj;
-      }
+      const [d, m, y] = header.split("/");
+      const dObj = new Date(`${y}-${m}-${d}`);
+      if (!lastDate || dObj > lastDate) lastDate = dObj;
     }
     totalScore = Math.max(0, Math.min(6, Math.round(totalScore)));
     return { score: totalScore, lastDate };
@@ -441,26 +457,28 @@ function doPost(e) {
 
   // 1) S'assurer que l'en-tête existe à F (targetIndex)
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const targetIndex = 6; // F
   let dateColIndex = headers.indexOf(dateStr) + 1; // 1-based
 
   if (dateColIndex === 0) {
     // nouvelle colonne à F
-    const targetIndex = 6;
     sheet.insertColumnBefore(targetIndex);
     sheet.getRange(1, targetIndex).setValue(dateStr);
     dateColIndex = targetIndex;
   } else if (dateColIndex !== targetIndex) {
-    // déplacer la colonne existante à F
-    const targetIndex = 6;
+    // déplacer la colonne existante à F, en compensant le décalage après suppression
     sheet.insertColumnBefore(targetIndex);
     const lastRow = sheet.getLastRow();
-    const sourceIndex = (dateColIndex >= targetIndex) ? dateColIndex + 1 : dateColIndex;
-    sheet.getRange(1, sourceIndex, lastRow).moveTo(sheet.getRange(1, targetIndex, lastRow));
-    sheet.deleteColumn(sourceIndex);
+
+    // 1-based
+    const sourceIndex = (dateColIndex >= targetIndex) ? (dateColIndex + 1) : dateColIndex;
+    // si la source est avant F, on vise temporairement G (= F+1), qui deviendra F après suppression
+    const destIndex = (dateColIndex < targetIndex) ? (targetIndex + 1) : targetIndex;
+
+    sheet.getRange(1, sourceIndex, lastRow).moveTo(sheet.getRange(1, destIndex, lastRow));
+    sheet.deleteColumn(sourceIndex); // après suppression, la date est bien en F
     dateColIndex = targetIndex;
   }
-
-  const targetIndex = 6; // F
 
   // 2) Parcours des lignes -> par ID
   const lastRow = sheet.getLastRow();
@@ -533,68 +551,69 @@ function sendAllTelegramReminders() {
     try {
       const ssId = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
       const trackingSheet = SpreadsheetApp.openById(ssId).getSheetByName("Tracking");
-      const headersTracking = trackingSheet.getRange(1, 1, 1, trackingSheet.getLastColumn()).getValues()[0];
-      const data = trackingSheet.getRange(2, 1, trackingSheet.getLastRow() - 1, trackingSheet.getLastColumn()).getValues();
 
-      // Ajout : lecture des notes pour délai manuel
-      const notes = trackingSheet.getRange(2, 1, trackingSheet.getLastRow()-1, 1).getNotes().map(r=>r[0]||"");
-      function parseDailyDue(note){
-        const m = note.match(/\[delay:daily\|[^]]*due=(\d{4}-\d{2}-\d{2})/);
-        return m ? m[1] : null;
-      }
+      const lr = trackingSheet.getLastRow();
+      const lc = trackingSheet.getLastColumn();
+      const headersTracking = trackingSheet.getRange(1, 1, 1, lc).getValues()[0];
+      const data  = lr > 1 ? trackingSheet.getRange(2, 1, lr - 1, lc).getValues() : [];
+      const notes = lr > 1 ? trackingSheet.getRange(2, 1, lr - 1, 1).getNotes().map(r => r[0] || "") : [];
+
       let count = 0;
-      data.forEach((r, i) => {
-        const freq = clean(r[3]);
-        // ❌ Exclure la pratique délibérée des rappels quotidiens
-        if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) return;
+      if (data.length > 0) {
+        data.forEach((r, i) => {
+          const freq = clean(r[3]);
 
-        const isSpaced = freq.includes("repetition espacee") || freq.includes("répétition espacée");
-        const isQuotidien = freq.includes("quotidien");
-        const isMatchingDay = JOURS.some(j => freq.includes(j) && j === refDayName);
+          // ❌ Exclure la pratique délibérée des rappels quotidiens
+          if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) return;
 
-        let include = false;
-        if (isSpaced) {
-          let score = 0;
-          let lastDate = null;
-          for (let col = headersTracking.length - 1; col >= 5; col--) {
-            const val = clean(r[col]);
-            if (!val) continue;
-            score += ANSWER_VALUES[val] ?? 0;
+          const isSpaced = freq.includes("repetition espacee") || freq.includes("répétition espacée");
+          const isQuotidien = freq.includes("quotidien");
+          const isMatchingDay = JOURS.some(j => freq.includes(j) && j === refDayName);
 
-            const [d, m, y] = (headersTracking[col] || "").split("/");
-            if (d && m && y) {
+          let include = false;
+          if (isSpaced) {
+            let score = 0;
+            let lastDate = null;
+            for (let col = headersTracking.length - 1; col >= 5; col--) {
+              const header = String(headersTracking[col] || "");
+              if (!/^\d{2}\/\d{2}\/\d{4}$/.test(header)) continue; // ignorer non-dates
+              const val = clean(r[col]);
+              if (!val) continue;
+              score += ANSWER_VALUES[val] ?? 0;
+              const [d, m, y] = header.split("/");
               const parsed = new Date(`${y}-${m}-${d}`);
               if (!lastDate || parsed > lastDate) lastDate = parsed;
             }
+            score = Math.max(0, Math.min(6, Math.round(score)));
+            const delay = DELAYS[score];
+            if (lastDate) {
+              const next = new Date(lastDate);
+              next.setDate(next.getDate() + delay);
+              include = today >= next;
+            } else include = true;
           }
-          score = Math.max(0, Math.min(6, Math.round(score)));
-          const delay = DELAYS[score];
-          if (lastDate) {
-            const next = new Date(lastDate);
-            next.setDate(next.getDate() + delay);
-            include = today >= next;
-          } else include = true;
-        }
 
-        if (!isSpaced && (isQuotidien || isMatchingDay)) {
-          include = true;
-        }
+          if (!isSpaced && (isQuotidien || isMatchingDay)) {
+            include = true;
+          }
 
-        // Ajout : ignorer si délai manuel daily en cours
-        const dueISO = parseDailyDue(notes[i]);
-        if (dueISO) {
-          include = include && (Utilities.formatDate(today, Session.getScriptTimeZone(), "yyyy-MM-dd") >= dueISO);
-        }
+          // Ignorer si délai manuel daily en cours
+          const dueISO = notes[i] ? (notes[i].match(/\[delay:daily\|[^]]*due=(\d{4}-\d{2}-\d{2})/)?.[1] || null) : null;
+          if (dueISO) {
+            include = include && (Utilities.formatDate(today, Session.getScriptTimeZone(), "yyyy-MM-dd") >= dueISO);
+          }
 
-        if (include) count++;
-      });
+          if (include) count++;
+        });
+      }
+  // Après le calcul de `count`…
+  const botToken = botApi.replace("https://api.telegram.org/bot", "").split("/")[0];
+  const displayUser = user.charAt(0).toUpperCase() + user.slice(1);
+  const message = count === 0
+    ? `🎉 Hello ${displayUser}, rien à remplir aujourd’hui !\n👉 ${trackingUrl}`
+    : `📋 Hello ${displayUser}, tu as ${count} chose(s) à traquer aujourd’hui (${formattedDate})\n👉 ${trackingUrl}`;
 
-      const botToken = botApi.replace("https://api.telegram.org/bot", "").split("/")[0];
-      const message = count === 0
-        ? `🎉 Hello ${user}, rien à remplir aujourd’hui !\n👉 ${trackingUrl}`
-        : `📋 Hello ${user}, tu as ${count} chose(s) à traquer aujourd’hui (${formattedDate})\n👉 ${trackingUrl}`;
-
-      sendTelegramMessage(chatId, message, botToken);
+  sendTelegramMessage(chatId, message, botToken);
     } catch (e) {
       Logger.log(`Erreur pour ${user} : ${e}`);
     }
