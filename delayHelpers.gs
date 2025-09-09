@@ -327,7 +327,8 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
     streak = 0;
     _clearDelayFrom(responseRange);
     _clearDelayFrom(anchor);
-    const sr = { on: true, unit: (mode === "daily" ? "days" : "iters"), n: streak, interval: 0 };
+    const prevOn = !!srPrev.on;
+    const sr = { on: prevOn, unit: (mode === "daily" ? "days" : "iters"), n: streak, interval: 0 };
     _writeSRTag(anchor, sr);
     return (mode === "daily")
       ? { unit: "days", dueISO: null, interval: 0, n: streak }
@@ -350,7 +351,8 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
   if (interval <= 0) {
     _clearDelayFrom(responseRange);
     _clearDelayFrom(anchor);
-    const sr = { on: true, unit: (mode === "daily" ? "days" : "iters"), n: streak, interval: 0 };
+    const prevOn = !!srPrev.on;
+    const sr = { on: prevOn, unit: (mode === "daily" ? "days" : "iters"), n: streak, interval: 0 };
     _writeSRTag(anchor, sr);
     return (mode === "daily")
       ? { unit: "days", dueISO: null, interval: 0, n: streak }
@@ -367,7 +369,8 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
     _writeNoteWithTag(responseRange, human, { mode: 'daily', due: dueISO, base: String(baseDateISO_or_Category) });
     _writeNoteWithTag(anchor,       human, { mode: 'daily', due: dueISO, base: String(baseDateISO_or_Category) });
 
-    const sr = { on: true, unit: "days", n: streak, interval: interval, due: dueISO };
+    const prevOn = !!srPrev.on;
+    const sr = { on: prevOn, unit: "days", n: streak, interval: interval, due: dueISO };
     _writeSRTag(anchor, sr);
     return { unit: "days", dueISO, interval, n: streak };
   }
@@ -379,7 +382,8 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
     _writeNoteWithTag(responseRange, human, { mode: 'practice', category, remain: String(interval) });
     _writeNoteWithTag(anchor,        human, { mode: 'practice', category, remain: String(interval) });
 
-    const sr = { on: true, unit: "iters", n: streak, interval: interval };
+    const prevOn = !!srPrev.on;
+    const sr = { on: prevOn, unit: "iters", n: streak, interval: interval };
     _writeSRTag(anchor, sr);
     return { unit: "iters", remain: interval, interval, n: streak };
   }

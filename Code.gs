@@ -254,29 +254,24 @@ function doGet(e) {
     const isQuotidien = freq.includes("quotidien");
     const isSpaced = freq.includes("repetition espacee") || freq.includes("répétition espacée");
 
-    // ⚠️ Exclure le "pratique délibérée" du mode journalier
-    if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) {
-      continue;
-    }
+    // Exclure pratique délibérée
+    if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) continue;
 
-    const matchingDays = JOURS.filter(j => freq.includes(j));
+    // Préparer ancre (A) tôt pour lire tags
+    const rowIndex = idx + 2;
+    const anchor = sheet.getRange(rowIndex, 1);
 
+    // Historique (inchangé)
     const history = [];
     for (let col = headers.length - 1; col >= 5; col--) {
       const val = row[col];
       const dateStr = headers[col];
-      if (!dateStr) continue;
-
-      // Seulement les colonnes qui sont des dates (dd/MM/yyyy)
       if (!/^\d{2}\/\d{2}\/\d{4}$/.test(String(dateStr))) continue;
-
       if (val !== "" && val !== null && val !== undefined) {
         const [d, m, y] = dateStr.split("/");
         const entryDate = new Date(`${y}-${m}-${d}`);
         const entryOnly = new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate());
-        if (entryOnly <= refDateOnly) {
-          history.push({ value: val, date: dateStr, colIndex: col });
-        }
+        if (entryOnly <= refDateOnly) history.push({ value: val, date: dateStr, colIndex: col });
       }
     }
 
@@ -286,8 +281,24 @@ function doGet(e) {
     let reason = null;
     let spacedInfo = null;
 
-    if (isQuotidien || matchingDays.includes(refDayName)) include = true;
+    // 1) Règle de base : quotidien / jour correspondant
+    if (isQuotidien || JOURS.filter(j => freq.includes(j)).includes(refDayName)) include = true;
 
+    // 2) SR manuel [delay:daily]
+    const selISO = Utilities.formatDate(refDateOnly, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    const manual = getDailyDue(anchor); // { dueISO, human } | null
+    if (manual) {
+      const dueISO = manual.dueISO;
+      if (selISO < dueISO) {
+        include = false;
+        skipped = true;
+        const manualNextFR = Utilities.formatDate(_parseISO(dueISO), Session.getScriptTimeZone(), "dd/MM/yyyy");
+        nextDate = manualNextFR;
+        reason = `⏱️ Répétition espacée — revient le ${manualNextFR}.`;
+      }
+    }
+
+    // 3) SR automatique (score -> DELAYS)
     if (isSpaced) {
       const { score, lastDate } = computeScoreAndLastDate(row);
       const delay = DELAYS[score];
@@ -297,48 +308,40 @@ function doGet(e) {
         next.setHours(0,0,0,0);
         next.setDate(next.getDate() + delay);
       }
-
-      // ✅ due => afficher
-      if (!next || referenceDate >= next) {
-        include = true;
-      }
-
-      // 🔕 masquer aujourd’hui si pas encore dû (et donner la raison)
-      if (isToday && next && referenceDate < next) {
-        skipped = true;
-        include = false;
-        nextDate = Utilities.formatDate(next, Session.getScriptTimeZone(), "dd/MM/yyyy");
-        reason = `✅ Réponse positive enregistrée récemment. Prochaine apparition prévue le ${nextDate}.`;
-      }
-
+      const nextFR = next ? Utilities.formatDate(next, Session.getScriptTimeZone(), "dd/MM/yyyy") : null;
       spacedInfo = {
         score,
         lastDate: lastDate ? Utilities.formatDate(lastDate, Session.getScriptTimeZone(), "dd/MM/yyyy") : null,
-        nextDate: next ? Utilities.formatDate(next, Session.getScriptTimeZone(), "dd/MM/yyyy") : null
+        nextDate: nextFR
       };
+      if (!next || referenceDate >= next) include = true;
+      else if (isToday && referenceDate < next) {
+        include = false; skipped = true; nextDate = nextFR;
+        reason = `✅ Réponse positive enregistrée récemment. Prochaine apparition prévue le ${nextFR}.`;
+      }
     }
 
-    // Priority & Row ID from anchor
-    const rowIndex = idx + 2;
-    const anchor = sheet.getRange(rowIndex, 1);
+    // Priority & Row ID
     const priority = getPriority(anchor);
     const qid = ensureRowId(anchor);
-
     const srInfo = getSRInfo(anchor);
-    const base = {
-      id: qid, label, type, history, isSpaced, spacedInfo, priority,
-      category: cat,
-      frequency: freqRaw,
-      scheduleInfo: {
-        unit: "days",
-        nextDate: nextDate || spacedInfo?.nextDate || null,
-        sr: srInfo
-      }
-    };
+
     if (skipped) {
-      result.push({ ...base, skipped: true, nextDate, reason });
-    } else if (include) {
-      result.push({ ...base, skipped: false });
+      result.push({
+        id: qid, label, type, history,
+        isSpaced, spacedInfo, priority,
+        category: cat, frequency: freqRaw,
+        scheduleInfo: { unit: "days", nextDate: nextDate || spacedInfo?.nextDate || null, sr: srInfo },
+        skipped: true, nextDate, reason
+      });
+    } else if (include && label) {
+      result.push({
+        id: qid, label, type, history,
+        isSpaced, spacedInfo, priority,
+        category: cat, frequency: freqRaw,
+        scheduleInfo: { unit: "days", nextDate: nextDate || spacedInfo?.nextDate || null, sr: srInfo },
+        skipped: false
+      });
     }
   }
 
@@ -410,6 +413,14 @@ function doPost(e) {
     if (data.frequency != null)sheet.getRange(rowIndex,4).setValue(data.frequency);
     if (data.newLabel != null) sheet.getRange(rowIndex,5).setValue(data.newLabel);
     if (data.priority != null) setPriority(sheet.getRange(rowIndex,1), parseInt(data.priority,10)||2);
+    // Adapter l'unité SR si la fréquence a changé
+    if (data.frequency != null) {
+      const f = clean(data.frequency || "");
+      const unit = (f.includes("pratique deliberee") || f.includes("pratique délibérée")) ? "iters" : "days";
+      const anchor = sheet.getRange(rowIndex, 1);
+      const prev = getSRInfo(anchor);
+      setSRToggle(anchor, !!prev.on, unit);
+    }
 
     return ContentService.createTextOutput("✅ consigne mise à jour").setMimeType(ContentService.MimeType.TEXT);
   }
@@ -495,16 +506,22 @@ function doPost(e) {
     });
     dateColIndex = targetIndex;
   } else if (dateColIndex !== targetIndex) {
-    // Déplacement complet sous verrou (recalcule les indices pour éviter les décalages concurrentiels)
+    // Calculer la source AVANT insertion, puis effectuer l'opération sous verrou
+    const headers0 = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    let srcIdx = headers0.indexOf(dateStr) + 1; // 1-based (0 => introuvable)
+
     withLock(function(){
-      const headersNow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-      let dateColIndexNow = headersNow.indexOf(dateStr) + 1; // 1-based
+      if (srcIdx === 0) {
+        sheet.insertColumnBefore(targetIndex);
+        sheet.getRange(1, targetIndex).setValue(dateStr);
+        return;
+      }
+      if (srcIdx === targetIndex) return;
       sheet.insertColumnBefore(targetIndex);
       const lastRowNow = sheet.getLastRow();
-      const sourceIndex = (dateColIndexNow >= targetIndex) ? (dateColIndexNow + 1) : dateColIndexNow;
-      const destIndex   = (dateColIndexNow <  targetIndex) ? (targetIndex + 1) : targetIndex;
-      sheet.getRange(1, sourceIndex, lastRowNow).moveTo(sheet.getRange(1, destIndex, lastRowNow));
-      sheet.deleteColumn(sourceIndex);
+      if (srcIdx >= targetIndex) srcIdx += 1; // la source a glissé d'une colonne
+      sheet.getRange(1, srcIdx, lastRowNow).moveTo(sheet.getRange(1, targetIndex, lastRowNow));
+      sheet.deleteColumn(srcIdx + (srcIdx > targetIndex ? 0 : 1));
     });
     dateColIndex = targetIndex;
   }
@@ -603,6 +620,7 @@ function sendAllTelegramReminders() {
             const delay = DELAYS[score];
             if (lastDate) {
               const next = new Date(lastDate);
+              next.setHours(0,0,0,0);
               next.setDate(next.getDate() + delay);
               include = today >= next;
             } else include = true;

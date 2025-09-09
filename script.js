@@ -1,4 +1,6 @@
 // SCRIPT.JS - 🧑 Identifier l’utilisateur depuis l’URL
+if (window.__APP_ALREADY_WIRED__) { throw new Error("Script chargé deux fois"); }
+window.__APP_ALREADY_WIRED__ = true;
 const urlParams = new URLSearchParams(location.search);
 const user = urlParams.get("user")?.toLowerCase();
 
@@ -42,7 +44,8 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}&ts=${Date.now()}`, { signa
   .catch(err => {
     showToast("❌ Erreur lors du chargement de la configuration.", "red");
     console.error("Erreur attrapée :", err);
-  });
+  })
+  .finally(() => clearTimeout(cfgTimer));
 
 // ---- Toast minimal (non bloquant) ----
 function ensureToast() {
@@ -53,6 +56,8 @@ function ensureToast() {
     t.className = "fixed top-4 right-4 hidden z-50";
     document.body.appendChild(t);
   }
+  t.setAttribute("role", "status");
+  t.setAttribute("aria-live", "polite");
   return t;
 }
 
@@ -98,15 +103,19 @@ function addSROnlyUI(wrapper, q) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.setAttribute("role", "switch");
+  btn.setAttribute("tabindex", "0");
   const refresh = () => {
     const on = window.__srToggles[q.id] === "on";
     btn.className = "text-sm px-2 py-1 rounded " + (on ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-800");
     btn.textContent = on ? "ON" : "OFF";
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.setAttribute("aria-checked", on ? "true" : "false");
   };
   btn.addEventListener("click", () => {
     window.__srToggles[q.id] = (window.__srToggles[q.id] === "on" ? "off" : "on");
     refresh();
+  });
+  btn.addEventListener("keydown", (e) => {
+    if (e.key === " " || e.key === "Enter") { e.preventDefault(); btn.click(); }
   });
   refresh();
   row.appendChild(btn);
@@ -152,7 +161,12 @@ function moveCardToGroup(cardEl, newP){
     2: container.querySelector('[data-group="p2"]'),
     3: container.querySelector('[data-group="p3"]')
   };
-  if (groups[newP]) groups[newP].appendChild(cardEl);
+  if (groups[newP]) {
+    groups[newP].appendChild(cardEl);
+  } else {
+    // fallback simple: re-render si le groupe n'existe pas encore
+    window.handleSelectChange?.();
+  }
 }
 
 const TYPE_OPTIONS = [
@@ -170,7 +184,8 @@ const FREQ_OPTIONS = [
 async function getAllCategories(){
   if (window.__allCategories) return window.__allCategories;
   try{
-    const res = await fetch(`${apiUrl}?mode=consignes`);
+    const res = await fetch(`${apiUrl}?mode=consignes&ts=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const rows = await res.json();
     const set = new Set(rows.map(r => (r.category || "").trim()).filter(Boolean));
     window.__allCategories = Array.from(set).sort();
@@ -299,18 +314,19 @@ async function openConsigneEditorInline(mountEl, qOrNull){
 
 function consigneRow(c){
   const tag = PRIO[c.priority||2] || PRIO[2];
-  return `
-    <div class="py-3 flex items-center justify-between">
-      <div class="min-w-0">
-        <div class="font-medium truncate">${c.label}</div>
-        <div class="text-sm text-gray-500 truncate">${c.category} • ${c.type} • ${c.frequency}</div>
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="text-xs px-2 py-0.5 rounded ${tag.badge}">${tag.text}</span>
-        <button class="edit px-2 py-1 text-sm rounded bg-blue-600 text-white" data-id="${c.id}">Éditer</button>
-        <button class="del px-2 py-1 text-sm rounded bg-red-600 text-white" data-id="${c.id}">Suppr.</button>
-      </div>
-    </div>`;
+  const row = document.createElement("div");
+  row.className = "py-3 flex items-center justify-between";
+  const left = document.createElement("div"); left.className = "min-w-0";
+  const t1 = document.createElement("div"); t1.className = "font-medium truncate"; t1.textContent = c.label || "";
+  const t2 = document.createElement("div"); t2.className = "text-sm text-gray-500 truncate"; t2.textContent = [c.category, c.type, c.frequency].filter(Boolean).join(" • ");
+  left.append(t1, t2);
+  const right = document.createElement("div"); right.className = "flex items-center gap-2";
+  const b = document.createElement("span"); b.className = `text-xs px-2 py-0.5 rounded ${tag.badge}`; b.textContent = tag.text;
+  const edit = document.createElement("button"); edit.className = "edit px-2 py-1 text-sm rounded bg-blue-600 text-white"; edit.dataset.id = c.id; edit.textContent = "Éditer";
+  const del = document.createElement("button"); del.className = "del px-2 py-1 text-sm rounded bg-red-600 text-white"; del.dataset.id = c.id; del.textContent = "Suppr.";
+  right.append(b, edit, del);
+  row.append(left, right);
+  return row.outerHTML; // conserve l’API qui renvoie une string si c’était utilisé ainsi
 }
 
 function renderQuestions(questions) {
@@ -344,7 +360,6 @@ function renderQuestions(questions) {
   const p3 = visible.filter(q => (q.priority||2) === 3);
 
   const renderGroup = (arr, {title, style, collapsed, groupKey}) => {
-    if (!arr.length) return;
     const block = document.createElement("div");
     block.className = "mb-6";
     const header = document.createElement("div");
@@ -460,6 +475,15 @@ function renderQuestions(questions) {
       const type = (q.type || "").toLowerCase();
       if (type.includes("oui")) {
         input = yesNoGroup(q.id, referenceAnswer);
+        const radios = input.querySelectorAll('input[type="radio"]');
+        radios.forEach((r, idx) => {
+          const id = `${q.id}-yn-${idx}`;
+          r.id = id;
+          const lab = r.parentElement;
+          if (lab && lab.tagName.toLowerCase() === 'label') {
+            // label imbriqué suffit; pas besoin de for, on laisse tel quel
+          }
+        });
       } else if (type.includes("menu") || type.includes("likert")) {
         input = document.createElement("select");
         input.name = q.id;
@@ -683,6 +707,11 @@ async function initApp() {
   if (dateSelect) {
     dateSelect.addEventListener("change", handleSelectChange);
     const todayISO = new Date().toISOString().slice(0, 10);
+    if (!dateSelect.value) {
+      const opt = document.createElement('option');
+      opt.value = todayISO; opt.textContent = todayISO;
+      dateSelect.appendChild(opt);
+    }
     dateSelect.value = todayISO;
     handleSelectChange();
   } else {
@@ -690,3 +719,42 @@ async function initApp() {
     loadFormForDate(todayISO);
   }
 }
+
+// --- Envoi des réponses et toggles SR ---
+document.getElementById("submitBtn")?.addEventListener("click", async (e) => {
+  e.preventDefault();
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    const dateISO = document.getElementById("date-select")?.value;
+    if (!dateISO) throw new Error("Date manquante");
+    const form = document.getElementById("daily-form");
+    const payload = { _date: dateISO };
+
+    form.querySelectorAll("[name]").forEach(el => {
+      if (el.type === "radio") {
+        if (el.checked) payload[el.name] = el.value;
+      } else {
+        payload[el.name] = el.value ?? "";
+      }
+    });
+
+    const base = window.__srBaseline || {};
+    const cur  = window.__srToggles  || {};
+    for (const [id, state] of Object.entries(cur)) {
+      if (base[id] !== state) payload["__srToggle__" + id] = state;
+    }
+
+    const res = await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const txt = await res.text().catch(()=> "");
+    if (!res.ok || (txt && txt.startsWith("❌"))) throw new Error(txt || `HTTP ${res.status}`);
+
+    showToast("✅ Données enregistrées !");
+    handleSelectChange();
+  } catch (err) {
+    console.error(err);
+    showToast("❌ Échec de l’envoi", "red");
+  } finally {
+    btn.disabled = false;
+  }
+});
