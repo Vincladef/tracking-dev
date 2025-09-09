@@ -9,6 +9,17 @@ if (!user) {
   throw new Error("Utilisateur manquant");
 }
 
+(function showUserInTitle(){
+  const h1 = document.getElementById("user-title");
+  if (!h1 || !user) return;
+  const chip = document.createElement("span");
+  const pretty = user.charAt(0).toUpperCase() + user.slice(1);
+  chip.className = "ml-3 text-sm px-2 py-0.5 rounded bg-gray-100 text-gray-700";
+  chip.textContent = pretty;
+  h1.appendChild(chip);
+  document.title = `Formulaire du jour — ${pretty}`;
+})();
+
 // 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
 const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
 
@@ -46,6 +57,10 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}&ts=${Date.now()}`, { signa
     console.error("Erreur attrapée :", err);
   })
   .finally(() => clearTimeout(cfgTimer));
+
+async function postJSON(payload) {
+  return fetch(apiUrl, { method: "POST", body: JSON.stringify(payload) });
+}
 
 // ---- Toast minimal (non bloquant) ----
 function ensureToast() {
@@ -240,7 +255,24 @@ function consigneEditorForm(defaults, categories){
     opts.forEach(v => select.add(new Option(v, v, false, v === selected)));
   }
   setOptions(typeSel, TYPE_OPTIONS, c.type);
-  setOptions(freqSel, FREQ_OPTIONS, c.frequency);
+  // Multi-select pour la fréquence (CSV)
+  freqSel.multiple = true;
+  freqSel.size = Math.min(FREQ_OPTIONS.length, 9);
+  const selectedFreqs = String(c.frequency || "")
+    .split(/[,\u2022]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  freqSel.innerHTML = "";
+  FREQ_OPTIONS.forEach(v => {
+    const opt = new Option(v, v, false, selectedFreqs.includes(v));
+    freqSel.add(opt);
+  });
+  freqSel.addEventListener("change", () => {
+    const vals = Array.from(freqSel.selectedOptions).map(o => o.value);
+    if (vals.includes("Pratique délibérée") && vals.length > 1) {
+      Array.from(freqSel.options).forEach(o => o.selected = (o.value === "Pratique délibérée"));
+    }
+  });
   // Catégories + entrée autre
   catSel.innerHTML = "";
   catSel.add(new Option("— Choisir —", ""));
@@ -260,7 +292,7 @@ function consigneEditorForm(defaults, categories){
     return {
       category: catValue,
       type:     box.querySelector(".ce-type").value,
-      frequency:box.querySelector(".ce-freq").value,
+      frequency:Array.from(freqSel.selectedOptions).map(o => o.value).join(", "),
       label:    box.querySelector(".ce-label").value,
       priority: parseInt(sel.value,10)
     };
@@ -280,7 +312,7 @@ function consigneEditorForm(defaults, categories){
       const payload = defaults?.id
         ? { _action:"consigne_update", id: defaults.id, category: vals.category, type: vals.type, frequency: vals.frequency, newLabel: vals.label, priority: vals.priority }
         : { _action:"consigne_create", category: vals.category, type: vals.type, frequency: vals.frequency, label: vals.label, priority: vals.priority };
-      const res = await fetch(`${apiUrl}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
+      const res = await postJSON(payload);
       const txt = await res.text().catch(()=> "");
       if (!res.ok || (txt && txt.startsWith("❌"))) throw new Error(txt || `HTTP ${res.status}`);
       showToast(defaults?.id ? "✅ Consigne mise à jour" : "✅ Consigne créée");
@@ -405,11 +437,7 @@ function renderQuestions(questions) {
       pSel.addEventListener("change", async () => {
         const newP = parseInt(pSel.value, 10) || 2;
         try {
-          const res = await fetch(`${apiUrl}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ _action: "consigne_update", id: q.id, priority: newP })
-          });
+          const res = await postJSON({ _action: "consigne_update", id: q.id, priority: newP });
           const txt = await res.text().catch(() => "");
           if (!res.ok || (txt && txt.startsWith("❌"))) throw new Error(txt || `HTTP ${res.status}`);
           // maj visuelle immédiate
@@ -438,11 +466,7 @@ function renderQuestions(questions) {
         if (!confirm("Supprimer cette consigne ?")) return;
         delBtn.disabled = true;
         try {
-          const r = await fetch(`${apiUrl}`, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ _action:"consigne_delete", id: q.id })
-          });
+          const r = await postJSON({ _action:"consigne_delete", id: q.id });
           const t = await r.text().catch(()=> "");
           if (!r.ok || (t && t.startsWith("❌"))) throw new Error(t || `HTTP ${r.status}`);
           showToast("🗑️ Consigne supprimée");
@@ -745,7 +769,7 @@ document.getElementById("submitBtn")?.addEventListener("click", async (e) => {
       if (base[id] !== state) payload["__srToggle__" + id] = state;
     }
 
-    const res = await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const res = await postJSON(payload);
     const txt = await res.text().catch(()=> "");
     if (!res.ok || (txt && txt.startsWith("❌"))) throw new Error(txt || `HTTP ${res.status}`);
 
