@@ -1,4 +1,4 @@
-// 🧑 Identifier l’utilisateur depuis l’URL
+// SCRIPT.JS - 🧑 Identifier l’utilisateur depuis l’URL
 const urlParams = new URLSearchParams(location.search);
 const user = urlParams.get("user")?.toLowerCase();
 
@@ -171,7 +171,7 @@ function openConsigneEditorInline(mountEl, qOrNull){
 
       await fetch(`${apiUrl}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
       showToast(isUpdate ? "✅ Consigne mise à jour" : "✅ Consigne créée");
-      handleSelectChange();
+      window.handleSelectChange?.();
     }catch(e){ showToast("❌ Erreur enregistrement", "red"); }
   });
 }
@@ -208,7 +208,7 @@ async function initApp() {
     const pastDates = [...Array(7)].map((_, i) => {
       const d = new Date(); d.setDate(d.getDate() - i);
       return {
-        value: d.toISOString().split("T")[0],
+        value: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`,
         label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
       };
     });
@@ -302,7 +302,6 @@ async function initApp() {
 
   function handleSelectChange() {
     // on repart propre à chaque changement
-    if (window.__delayValues) window.__delayValues = {};
     if (window.__srToggles)   window.__srToggles   = {};
     if (window.__srBaseline)  window.__srBaseline  = {};
 
@@ -323,6 +322,7 @@ async function initApp() {
       loadPracticeForm(selected.dataset.category);
     }
   }
+  window.handleSelectChange = handleSelectChange;
 
   // 📨 Soumission
   document.getElementById("submitBtn").addEventListener("click", (e) => {
@@ -332,9 +332,6 @@ async function initApp() {
     const formData = new FormData(form);
     const entries = Object.fromEntries(formData.entries());
 
-    // ⬅️ ajoute les délais choisis via le menu
-    Object.assign(entries, window.__delayValues || {});
-    
     // embarquer l'état SR pour TOUTES les questions (visibles + masquées),
     // mais seulement si l'utilisateur a modifié l'état par rapport au backend
     if (window.__srToggles && window.__srBaseline) {
@@ -383,12 +380,12 @@ async function initApp() {
         showToast("✅ Réponses envoyées !");
         console.log("✅ Réponses envoyées avec succès.", { payload: entries });
 
-        // recharge automatiquement la vue pour refléter les délais posés
+        // recharge automatiquement la vue pour refléter l’état de SR
         const selected = dateSelect.selectedOptions[0];
         const mode = selected?.dataset.mode || "daily";
 
         // on peut vider les délais mémorisés pour repartir propre
-        if (window.__delayValues) window.__delayValues = {};
+        // if (window.__delayValues) window.__delayValues = {};
         // on repart propre aussi pour SR
         window.__srToggles  = {};
         window.__srBaseline = {};
@@ -399,7 +396,7 @@ async function initApp() {
             loadPracticeForm(selected.dataset.category);
             showToast("➡️ Itération suivante chargée", "blue");
           } else {
-            // recharge la même date → masquera les questions avec un délai > 0
+            // recharge la même date → respectera l’échéance SR et masquera si non dû
             loadFormForDate(selected.dataset.date);
           }
         }, 250);
@@ -436,7 +433,7 @@ async function initApp() {
     }
   }
   function consigneRow(c){
-    const badge = c.priority===1 ? 'bg-green-100 text-green-800' : c.priority===2 ? 'bg-gray-100 text-gray-800' : 'bg-yellow-100 text-yellow-800';
+    const tag = PRIO[c.priority||2] || PRIO[2];
     return `
       <div class="py-3 flex items-center justify-between">
         <div class="min-w-0">
@@ -444,7 +441,7 @@ async function initApp() {
           <div class="text-sm text-gray-500 truncate">${c.category} • ${c.type} • ${c.frequency}</div>
         </div>
         <div class="flex items-center gap-2">
-          <span class="text-xs px-2 py-0.5 rounded ${badge}">P${c.priority||2}</span>
+          <span class="text-xs px-2 py-0.5 rounded ${tag.badge}">${tag.text}</span>
           <button class="edit px-2 py-1 text-sm rounded bg-blue-600 text-white" data-id="${c.id}">Éditer</button>
           <button class="del px-2 py-1 text-sm rounded bg-red-600 text-white" data-id="${c.id}">Suppr.</button>
         </div>
@@ -474,9 +471,9 @@ async function initApp() {
           <input id="ce-type" class="border rounded px-2 py-1" placeholder="Type (Oui/Non, Likert, Texte…)" value="${c.type||""}">
           <input id="ce-freq" class="border rounded px-2 py-1" placeholder="Fréquence (quotidien, mardi, repetition espacée, pratique délibérée…)" value="${c.frequency||""}">
           <select id="ce-pri" class="border rounded px-2 py-1">
-            <option value="1" ${c.priority===1?"selected":""}>Prioritaire (P1)</option>
-            <option value="2" ${!c.priority||c.priority===2?"selected":""}>Normale (P2)</option>
-            <option value="3" ${c.priority===3?"selected":""}>Secondaire (P3)</option>
+            <option value="1" ${c.priority===1?"selected":""}>Haute</option>
+            <option value="2" ${!c.priority||c.priority===2?"selected":""}>Normale</option>
+            <option value="3" ${c.priority===3?"selected":""}>Basse</option>
           </select>
         </div>
         <input id="ce-label" class="border rounded px-2 py-1 w-full mt-2" placeholder="Intitulé" value="${c.label||""}">
@@ -753,201 +750,6 @@ async function initApp() {
     canvas.addEventListener("mouseleave", () => { tip.style.opacity = "0"; });
   }
 
-  function addDelayUI(wrapper, q) {
-    const mode = document.getElementById("date-select").selectedOptions[0]?.dataset.mode || "daily";
-    const key = (mode === "daily" ? `__delayDays__` : `__delayIter__`) + q.id;
-
-    const row = document.createElement("div");
-    row.className = "mt-2 flex items-center gap-3 relative"; // relative pour ancrer le popover
-    wrapper.appendChild(row);
-
-    // Bouton
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "text-sm text-blue-600 hover:underline";
-    btn.textContent = "⏱️ Délai";
-    row.appendChild(btn);
-
-    // Info (prochaine échéance / délai choisi)
-    const info = document.createElement("span");
-    info.className = "text-xs text-gray-500";
-    const infos = [];
-    if (q.scheduleInfo?.nextDate) infos.push(`Prochaine : ${q.scheduleInfo.nextDate}`);
-    if (q.scheduleInfo?.remaining > 0) {
-      infos.push(`Revient dans ${q.scheduleInfo.remaining} itération(s)`);
-    }
-
-    // réaffiche la valeur déjà choisie si existante
-    if (window.__delayValues[key] != null) {
-      const n = parseInt(window.__delayValues[key], 10);
-      if (!Number.isNaN(n)) {
-        if (n === -1) {
-          infos.push("Délai : annulé");
-        } else {
-          infos.push(mode === "daily" ? `Délai choisi : ${n} j` : `Délai choisi : ${n} itérations`);
-        }
-      }
-    }
-    info.textContent = infos.join(" — ") || "";
-    row.appendChild(info);
-
-    // Popover (caché par défaut)
-    const pop = document.createElement("div");
-    pop.className = "absolute right-0 top-8 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 hidden";
-    pop.setAttribute("role", "menu");
-    // marquer le popover pour pouvoir fermer les autres
-    pop.setAttribute("data-pop", "delay");
-    row.appendChild(pop);
-
-    // Options rapides
-    const options = mode === "daily"
-      ? [
-          { label: "Aujourd’hui (0 j)", value: 0 },
-          { label: "+1 j", value: 1 },
-          { label: "+2 j", value: 2 },
-          { label: "+3 j", value: 3 },
-          { label: "1 semaine", value: 7 },
-          { label: "2 semaines", value: 14 },
-          { label: "1 mois (~30 j)", value: 30 }
-        ]
-      : [
-          { label: "1", value: 1 },
-          { label: "2", value: 2 },
-          { label: "3", value: 3 },
-          { label: "5", value: 5 },
-          { label: "8", value: 8 },
-          { label: "13", value: 13 },
-          { label: "21", value: 21 }
-        ];
-
-    const grid = document.createElement("div");
-    grid.className = "p-2 grid grid-cols-2 gap-2";
-    pop.appendChild(grid);
-
-    const setValue = (n) => {
-      window.__delayValues[key] = String(n);
-      if (n === -1) {
-        info.textContent = "Délai : annulé";
-      } else {
-        info.textContent = mode === "daily"
-          ? `Délai choisi : ${n} j`
-          : `Délai choisi : ${n} itérations`;
-      }
-      pop.classList.add("hidden");
-    };
-
-    options.forEach(opt => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "px-2 py-1 text-sm border border-gray-200 rounded hover:bg-gray-50";
-      b.textContent = opt.label;
-      b.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        setValue(opt.value);
-      });
-      grid.appendChild(b);
-    });
-
-    // Ligne d’actions
-    const actions = document.createElement("div");
-    actions.className = "border-t border-gray-100 p-2 flex items-center justify-between";
-    pop.appendChild(actions);
-
-    // Effacer (n=-1 => le backend effacera la note)
-    const clearBtn = document.createElement("button");
-    clearBtn.type = "button";
-    clearBtn.className = "text-xs text-red-600 hover:underline";
-    clearBtn.textContent = "Retirer le délai";
-    clearBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      setValue(-1);
-    });
-    actions.appendChild(clearBtn);
-
-    // Fermer
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "text-xs text-gray-600 hover:underline";
-    closeBtn.textContent = "Fermer";
-    closeBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      pop.classList.add("hidden");
-    });
-    actions.appendChild(closeBtn);
-
-    // --- ÉTAT SR côté front (mémoire volatile) ---
-    window.__srToggles = window.__srToggles || {}; // clé: q.id -> "on"|"off"
-    // Affichage de l'état SR actuel (v. API doGet ci-dessous)
-    const srCurrent = q.scheduleInfo?.sr || { on:false };
-    if (!(q.id in window.__srBaseline)) {
-      window.__srBaseline[q.id] = srCurrent.on ? "on" : "off";
-    }
-    if (!(q.id in window.__srToggles)) {
-      window.__srToggles[q.id] = srCurrent.on ? "on" : "off";
-    }
-    // Ligne SR
-    const srRow = document.createElement("div");
-    srRow.className = "border-t border-gray-100 p-2 flex items-center justify-between";
-    pop.appendChild(srRow);
-    const srLabel = document.createElement("span");
-    srLabel.className = "text-xs text-gray-700";
-    let srInfo = "";
-    if (srCurrent.on) {
-      if (srCurrent.interval === 0) {
-        srInfo = " <span class=\"text-gray-500\">(aucune échéance)</span>";
-      } else if (srCurrent.interval) {
-        srInfo = ` <span class=\"text-gray-500\">(${srCurrent.unit==="iters" ? srCurrent.interval+" itér." : srCurrent.due ? "due "+srCurrent.due : srCurrent.interval+" j"})</span>`;
-      }
-    }
-    srLabel.innerHTML = `Répétition espacée : <strong>${window.__srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>${srInfo}`;
-    srRow.appendChild(srLabel);
-    const srBtn = document.createElement("button");
-    srBtn.type = "button";
-    srBtn.className = "text-xs text-blue-600 hover:underline";
-    srBtn.textContent = window.__srToggles[q.id] === "on" ? "Désactiver SR" : "Activer SR";
-    srBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      window.__srToggles[q.id] = window.__srToggles[q.id] === "on" ? "off" : "on";
-      srBtn.textContent = window.__srToggles[q.id] === "on" ? "Désactiver SR" : "Activer SR";
-      srLabel.innerHTML = `Répétition espacée : <strong>${window.__srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>`;
-    });
-    srRow.appendChild(srBtn);
-
-    // Toggle popover + gestion du click outside (attaché à l'ouverture)
-    btn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-
-      // Ferme les autres popovers
-      document.querySelectorAll('[data-pop="delay"]').forEach(el => {
-        if (el !== pop) {
-          el.classList.add("hidden");
-          if (el._onOutside) {
-            document.removeEventListener("click", el._onOutside);
-            el._onOutside = null;
-          }
-        }
-      });
-
-      const wasHidden = pop.classList.contains("hidden");
-      pop.classList.toggle("hidden");
-
-      // si on vient d'ouvrir → poser l'écouteur; si on vient de fermer → l'enlever
-      if (wasHidden) {
-        pop._onOutside = (e) => {
-          if (!pop.contains(e.target) && e.target !== btn) {
-            pop.classList.add("hidden");
-            document.removeEventListener("click", pop._onOutside);
-            pop._onOutside = null;
-          }
-        };
-        setTimeout(() => document.addEventListener("click", pop._onOutside), 0);
-      } else if (pop._onOutside) {
-        document.removeEventListener("click", pop._onOutside);
-        pop._onOutside = null;
-      }
-    });
-  }
-
   // Renderer commun (journalier & pratique)
   function renderQuestions(questions) {
     const container = document.getElementById("daily-form");
@@ -1053,7 +855,8 @@ async function initApp() {
             const entry = q.history.find(entry => {
               if (entry?.date) {
                 const [dd, mm, yyyy] = entry.date.split("/");
-                const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+                const entryDateISO =
+                  `${String(yyyy).padStart(4, "0")}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
                 return entryDateISO === dateISO;
               }
               return false;
@@ -1193,7 +996,9 @@ async function initApp() {
         const extras = []; if (item.scheduleInfo?.nextDate) extras.push(`Prochaine : ${item.scheduleInfo.nextDate}`); if (Number(item.scheduleInfo?.remaining) > 0) extras.push(`Restant : ${item.scheduleInfo.remaining} itér.`);
         const tail = extras.length ? ` (${extras.join(" — ")})` : ""; const reason = item.reason || "Répétition espacée"; sub.innerHTML = `⏱️ ${reason.replace(/^✅\s*/, '')}${tail}`;
         const content = document.createElement("div"); content.className = "px-3 pb-3 hidden";
-        const delayWrap = document.createElement("div"); addDelayUI(delayWrap, item); content.appendChild(delayWrap);
+        const srWrap = document.createElement("div");
+        addSROnlyUI(srWrap, item);
+        content.appendChild(srWrap);
         if (item.history && item.history.length > 0) {
           const toggleBtn = document.createElement("button"); toggleBtn.type = "button"; toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline"; toggleBtn.textContent = "📓 Voir l’historique des réponses";
           const historyBlock = document.createElement("div"); historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
@@ -1204,7 +1009,7 @@ async function initApp() {
           ordered.forEach((entry, idx) => {
             const keyPretty = prettyKeyWithDate(entry); const val = entry.value; const normalized = normalize(val);
             const div = document.createElement("div"); div.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
-            if idx >= LIMIT) div.classList.add("hidden", "extra-history"); div.innerHTML = `<strong>${keyPretty}</strong> – ${val}`; historyBlock.appendChild(div);
+            if (idx >= LIMIT) div.classList.add("hidden", "extra-history"); div.innerHTML = `<strong>${keyPretty}</strong> – ${val}`; historyBlock.appendChild(div);
           });
           if (ordered.length > LIMIT) {
             const moreBtn = document.createElement("button"); moreBtn.type = "button"; moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";

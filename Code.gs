@@ -1,5 +1,5 @@
 // ============================
-//  Constantes & utilitaires
+//  Code.gs - Constantes & utilitaires
 // ============================
 const CONFIG_SHEET_ID = '1D9M3IEPtD7Vbdt7THBvNm8CiQ3qdrelyR-EdgNmd6go';
 
@@ -290,21 +290,6 @@ function doGet(e) {
     const priority = getPriority(anchor);
     const qid = ensureRowId(anchor);
 
-    // -- Délai journalier manuel depuis la note (prend le pas sur le reste)
-    const manualDue = getDailyDue(anchor); // { dueISO, human } | null
-    if (manualDue && queryDate) {
-      const selISO = Utilities.formatDate(referenceDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
-      if (selISO < manualDue.dueISO) {
-        include = false;
-        skipped = true;
-        // formate une jolie date JJ/MM/AAAA pour l'UI
-        const [yy, mm, dd] = manualDue.dueISO.split('-');
-        const next = new Date(`${yy}-${mm}-${dd}`);
-        nextDate = Utilities.formatDate(next, Session.getScriptTimeZone(), "dd/MM/yyyy");
-        reason = `⏱️ Délai manuel jusqu’au ${nextDate}.`;
-      }
-    }
-
     const srInfo = getSRInfo(anchor);
     const base = {
       id: qid, label, type, history, isSpaced, spacedInfo, priority,
@@ -436,15 +421,7 @@ function doPost(e) {
         applySRAfterAnswer(rCell, 1, category, "practice", data[qid]);
       }
 
-      // 4) Délai manuel (clé = ID)
-      const dKey = "__delayIter__" + qid;
-      if (dKey in data) {
-        const n = parseInt(data[dKey], 10);
-        if (Number.isFinite(n)) {
-          if (n <= 0) setPracticeDelayRemaining(rCell, category, 0);
-          else setPracticeDelayRemaining(rCell, category, n);
-        }
-      }
+  // ...délai manuel supprimé : SR-only
     }
 
     return ContentService.createTextOutput("✅ Itération enregistrée !").setMimeType(ContentService.MimeType.TEXT);
@@ -503,20 +480,6 @@ function doPost(e) {
       rCell.setValue(data[qid]);
       // c) SR demi-point -> pose le délai auto s'il faut
       applySRAfterAnswer(rCell, 1, selectedDate, "daily", data[qid]);
-    }
-
-    // d) Délai manuel (jours) envoyé depuis le front
-    const dKey = "__delayDays__" + qid;
-    if (dKey in data) {
-      const n = parseInt(data[dKey], 10);
-      if (Number.isFinite(n)) {
-        if (n === -1) {
-          // retirer délai (et reset SR n=0)
-          setDailyDelay(rCell, selectedDate, -1);
-        } else {
-          setDailyDelay(rCell, selectedDate, n);
-        }
-      }
     }
   }
 
