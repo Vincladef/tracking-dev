@@ -149,9 +149,12 @@ function canonicalizeLikert(v) {
 }
 
 function bindFieldAutosave(inputEl, qid) {
+  console.log("bindFieldAutosave appelé pour:", qid, inputEl.tagName);
+  
   const push = () => {
     let val = inputEl.value;
     if (inputEl.tagName === "SELECT") val = canonicalizeLikert(val);
+    console.log("Auto-save déclenché:", qid, "=", val);
     queueSoftSave({ [qid]: val }, inputEl);
   };
 
@@ -794,6 +797,7 @@ async function initApp() {
   let _softTimer = null;
   let _softAnchors = new Set();
   function queueSoftSave(patchObj, anchorEl) {
+    console.log("queueSoftSave reçu:", patchObj);
     Object.assign(_softBuffer, patchObj || {});
     if (anchorEl) _softAnchors.add(anchorEl);
 
@@ -1568,7 +1572,26 @@ async function initApp() {
 
       wrapper.appendChild(input);
       // Auto-save doux + mini anim
-      if (input.tagName === "SELECT" || input.tagName === "TEXTAREA" || input.type === "text") {
+      console.log("Type de champ créé:", q.id, "tagName:", input.tagName, "type:", input.type);
+      if (input.tagName === "SELECT") {
+        console.log("Auto-save activé pour SELECT:", q.id);
+        bindFieldAutosave(input, q.id);
+        // Backup manuel pour SELECT
+        input.addEventListener("change", () => {
+          console.log("Backup SELECT save:", q.id, input.value);
+          queueSoftSave({ [q.id]: canonicalizeLikert(input.value) }, wrapper);
+          flashSaved(wrapper);
+        });
+      } else if (input.tagName === "TEXTAREA") {
+        console.log("Auto-save activé pour TEXTAREA:", q.id);
+        bindFieldAutosave(input, q.id);
+        // Backup manuel pour TEXTAREA
+        input.addEventListener("input", () => {
+          console.log("Backup TEXTAREA save:", q.id, input.value);
+          queueSoftSave({ [q.id]: input.value }, wrapper);
+        });
+      } else if (input.type === "text") {
+        console.log("Auto-save activé pour TEXT:", q.id);
         bindFieldAutosave(input, q.id);
       } else {
         input.querySelectorAll('input[type="radio"]').forEach(r => {
