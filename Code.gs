@@ -32,10 +32,8 @@ function clean(str) {
 }
 
 function _cors(out) {
-  return out
-    .setHeader('Access-Control-Allow-Origin', 'https://vincladef.github.io')
-    .setHeader('Access-Control-Allow-Methods', 'GET, POST')
-    .setHeader('Access-Control-Allow-Headers', 'content-type');
+  // Apps Script TextOutput ne supporte pas setHeader; les CORS sont gérés par le Worker
+  return out;
 }
 function json(o) { return _cors(ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON)); }
 function text(s) { return _cors(ContentService.createTextOutput(String(s)).setMimeType(ContentService.MimeType.TEXT)); }
@@ -373,6 +371,32 @@ function doPost(e) {
     data = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : "{}");
   } catch (err) {
     return text("❌ JSON invalide");
+  }
+
+  // --- Proxy GET depuis le Worker: router vers doGet ---
+  function _parseQueryParams(q) {
+    var params = {};
+    q = String(q || "");
+    if (q.startsWith("?")) q = q.slice(1);
+    if (!q) return params;
+    q.split("&").forEach(function (pair) {
+      if (!pair) return;
+      var kv = pair.split("=");
+      var k = decodeURIComponent(kv[0] || "");
+      var v = decodeURIComponent(kv[1] || "");
+      if (!k) return;
+      if (params[k] !== undefined) {
+        if (Array.isArray(params[k])) params[k].push(v);
+        else params[k] = [params[k], v];
+      } else {
+        params[k] = v;
+      }
+    });
+    return params;
+  }
+  if (data && data._proxy === true && String(data.method).toUpperCase() === "GET") {
+    var params = _parseQueryParams(data.query || "");
+    return doGet({ parameter: params });
   }
 
   // ---------- CONSIGNES: create/update/delete ----------

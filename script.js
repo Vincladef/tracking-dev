@@ -192,6 +192,60 @@ async function initApp() {
     console.log("✅ Sélecteur de mode et de date prêt.");
   }
 
+  // ====== Fréquences et catégories (helpers modal) ======
+  const WEEKDAYS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"];
+  const FREQ_SPECIAL = ["Quotidien", "Répétition espacée", "Pratique délibérée", "archivé"];
+  function parseFreqString(s) {
+    const out = new Set();
+    String(s||"").split(",").map(x=>x.trim()).filter(Boolean).forEach(x => out.add(x));
+    return out;
+  }
+  function freqSetToString(set) { return Array.from(set).join(", "); }
+  async function getAllCategories() {
+    const cats = await apiFetch("GET", `?mode=practice`).catch(()=>[]);
+    const set = new Set(Array.isArray(cats)?cats:[]);
+    try {
+      const all = await apiFetch("GET", `?mode=consignes`);
+      (Array.isArray(all)?all:[]).forEach(x => { if (x.category) set.add(x.category); });
+    } catch {}
+    return Array.from(set).filter(Boolean).sort((a,b)=>a.localeCompare(b,'fr'));
+  }
+  function buildFreqMulti(container, currentString) {
+    container.innerHTML = "";
+    const current = parseFreqString(currentString);
+    const mk = (label) => {
+      const id = "f_" + label.toLowerCase().replace(/\s+/g,"_");
+      const wrap = document.createElement("label");
+      wrap.className = "inline-flex items-center gap-2 border rounded px-2 py-1 bg-white";
+      wrap.innerHTML = `
+        <input type="checkbox" id="${id}">
+        <span>${label}</span>
+      `;
+      const cb = wrap.querySelector("input");
+      cb.checked = current.has(label);
+      cb.dataset.freqLabel = label;
+      container.appendChild(wrap);
+    };
+    FREQ_SPECIAL.forEach(mk);
+    WEEKDAYS.forEach(mk);
+  }
+  function readFreqMulti(container) {
+    const set = new Set();
+    container.querySelectorAll('input[type="checkbox"]').forEach(cb => { if (cb.checked) set.add(cb.dataset.freqLabel); });
+    if (set.has("archivé")) return "archivé";
+    return freqSetToString(set);
+  }
+  function setupSRToggle(btn, initialOn) {
+    let on = !!initialOn;
+    const paint = () => {
+      btn.textContent = on ? "ON" : "OFF";
+      btn.className   = "px-2 py-1 rounded border text-sm " + (on ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-700 border-gray-200");
+    };
+    paint();
+    btn.onclick = () => { on = !on; paint(); };
+    return () => on;
+  }
+
   // Ordonne l'historique pour l'affichage en liste: RÉCENT -> ANCIEN
   function orderForHistory(hist) {
     const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
@@ -683,20 +737,69 @@ async function initApp() {
     });
   }
 
-  function openConsigneModal(c = null) {
+  async function openConsigneModal(c = null) {
     const modal = document.getElementById("consigne-modal");
     if (!modal) return;
     const form  = document.getElementById("consigne-form");
     document.getElementById("consigne-modal-title").textContent = c ? "Modifier la consigne" : "Nouvelle consigne";
 
-    // reset
     form.reset();
-    form.elements.id.value = c?.id || "";
-    form.elements.label.value = c?.label || "";
-    form.elements.category.value = c?.category || "";
-    form.elements.type.value = c?.type || "Oui/Non";
+    form.elements.id.value       = c?.id || "";
+    form.elements.label.value    = c?.label || "";
+    form.elements.type.value     = c?.type  || "Oui/Non";
     form.elements.priority.value = String(c?.priority || 2);
-    form.elements.frequency.value = c?.frequency || "Pratique délibérée";
+
+    const dl = document.getElementById("categories-datalist");
+    if (dl) {
+      dl.innerHTML = "";
+      getAllCategories().then(list => { list.forEach(cat => { const opt = document.createElement("option"); opt.value = cat; dl.appendChild(opt); }); });
+    }
+    const catInput = document.getElementById("consigne-category");
+    if (catInput) catInput.value = c?.category || "";
+
+    const freqBox = document.getElementById("freq-multi");
+    if (freqBox) buildFreqMulti(freqBox, c?.frequency || "");
+
+    const getSR = setupSRToggle(document.getElementById("sr-toggle"), c?.sr === "on");
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const payload = {
+        id: form.elements.id.value || null,
+        label: form.elements.label.value.trim(),
+        category: (document.getElementById("consigne-category")?.value || "").trim(),
+        type: form.elements.type.value,
+        priority: parseInt(form.elements.priority.value || "2", 10),
+        frequency: readFreqMulti(document.getElementById("freq-multi")) || "Pratique délibérée"
+      };
+      if (!payload.label) { showToast("❌ Label requis", "red"); return; }
+      try {
+        if (payload.id) {
+          await updateConsigne(payload);
+          const tKey = "__srToggle__" + payload.id;
+          const body = { _mode: "daily", _date: new Date().toISOString().slice(0,10) };
+          body[tKey] = getSR() ? "on" : "off";
+          await apiFetch("POST", "", body);
+          showToast("✅ Consigne mise à jour");
+        } else {
+          await apiFetch("POST", "", {
+            _action: "consigne_create",
+            category: payload.category,
+            type: payload.type,
+            frequency: payload.frequency,
+            label: payload.label,
+            priority: payload.priority,
+            apiUrl
+          });
+          showToast("✅ Consigne créée");
+        }
+        closeConsigneModal();
+        refreshCurrentView();
+      } catch (err) {
+        console.error(err);
+        showToast("❌ Erreur consigne", "red");
+      }
+    };
 
     modal.classList.remove("hidden");
   }
@@ -974,6 +1077,48 @@ async function initApp() {
       label.className = "block text-lg font-semibold mb-2";
       label.textContent = q.label;
       wrapper.appendChild(label);
+      // Actions inline (Modifier / Archiver / Supprimer)
+      const actions = document.createElement("div");
+      actions.className = "mt-1 flex items-center gap-3 text-sm";
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "text-blue-600 hover:underline";
+      editBtn.textContent = "Modifier";
+      editBtn.onclick = () => openConsigneModal({
+        id: q.id,
+        label: q.label,
+        category: q.category,
+        type: q.type || "Oui/Non",
+        priority: q.priority ?? 2,
+        frequency: q.frequency || "",
+        sr: (q.scheduleInfo?.sr?.on ? "on" : "off")
+      });
+      actions.appendChild(editBtn);
+
+      const archived = (q.frequency || "").toLowerCase().includes("archiv");
+      const archBtn = document.createElement("button");
+      archBtn.type = "button";
+      archBtn.className = "text-gray-700 hover:underline";
+      archBtn.textContent = archived ? "Désarchiver" : "Archiver";
+      archBtn.onclick = async () => {
+        await updateConsigne({ id: q.id, frequency: archived ? "Pratique délibérée" : "archivé" });
+        showToast(archived ? "✅ Désarchivée" : "✅ Archivée");
+        refreshCurrentView();
+      };
+      actions.appendChild(archBtn);
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "text-red-600 hover:underline";
+      delBtn.textContent = "Supprimer";
+      delBtn.onclick = async () => {
+        if (!confirm("Supprimer définitivement cette consigne ?")) return;
+        await deleteConsigne(q.id);
+        showToast("🗑️ Supprimée");
+        refreshCurrentView();
+      };
+      actions.appendChild(delBtn);
+      wrapper.appendChild(actions);
 
       // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
       let referenceAnswer = "";
@@ -1287,38 +1432,10 @@ async function initApp() {
     console.log("✅ Rendu des questions terminé.");
   }
 
-  // Brancher les événements de gestion consignes
-  loadConsignes().catch(console.error);
+  // Bouton nouvelle consigne
   const newBtn = document.getElementById("new-consigne-btn");
   if (newBtn) newBtn.addEventListener("click", () => openConsigneModal());
   const cancelBtn = document.getElementById("consigne-cancel");
   if (cancelBtn) cancelBtn.addEventListener("click", closeConsigneModal);
-  const form = document.getElementById("consigne-form");
-  if (form) form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const f = e.currentTarget;
-    const payload = {
-      id: f.elements.id.value || null,
-      label: f.elements.label.value.trim(),
-      category: f.elements.category.value.trim(),
-      type: f.elements.type.value,
-      priority: parseInt(f.elements.priority.value || "2", 10),
-      frequency: f.elements.frequency.value.trim() || "Pratique délibérée"
-    };
-    try {
-      if (payload.id) {
-        await updateConsigne(payload);
-        showToast("✅ Consigne mise à jour");
-      } else {
-        await createConsigne(payload);
-        showToast("✅ Consigne créée");
-      }
-      closeConsigneModal();
-      await loadConsignes();
-      refreshCurrentView();
-    } catch (err) {
-      console.error(err);
-      showToast("❌ Erreur consigne", "red");
-    }
-  });
+  // onsubmit du modal est désormais défini dans openConsigneModal()
 }
