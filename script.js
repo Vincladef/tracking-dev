@@ -110,32 +110,35 @@ function showToast(message, tone = "green") {
 
 function flashSaved(anchorEl) {
   try {
-    const host = anchorEl || document.body;
-    const badge = document.createElement("span");
-    badge.textContent = "✔";
-    badge.style.cssText = `
-      position:absolute; right:-6px; top:-6px;
-      background:#10b981; color:white; width:18px; height:18px;
+    const target = anchorEl || document.body;
+    const rect = target.getBoundingClientRect();
+    const dot = document.createElement("div");
+    dot.style.cssText = `
+      position: fixed;
+      left: ${Math.round(rect.right) - 6}px;
+      top: ${Math.round(rect.top) - 6}px;
+      width: 18px; height: 18px;
+      background:#10b981; color:#fff; border-radius:9999px;
       display:flex; align-items:center; justify-content:center;
-      border-radius:9999px; font-size:12px; box-shadow:0 1px 4px rgba(0,0,0,.15);
+      font-size:12px; box-shadow:0 1px 4px rgba(0,0,0,.15);
       opacity:0; transform:scale(.6); transition:opacity .15s, transform .2s;
-      z-index: 10;
+      z-index: 9999; pointer-events:none;
     `;
-    const wrap = document.createElement("span");
-    wrap.style.position = "relative";
-    wrap.style.display = "inline-block";
-    host.appendChild(wrap);
-    wrap.appendChild(badge);
-    requestAnimationFrame(() => { badge.style.opacity = "1"; badge.style.transform = "scale(1)"; });
-    setTimeout(() => { badge.style.opacity = "0"; }, 800);
-    setTimeout(() => { wrap.remove(); }, 1100);
+    dot.textContent = "✔";
+    document.body.appendChild(dot);
+    requestAnimationFrame(() => { dot.style.opacity = "1"; dot.style.transform = "scale(1)"; });
+    setTimeout(() => { dot.style.opacity = "0"; }, 800);
+    setTimeout(() => { dot.remove(); }, 1100);
   } catch {}
 }
 
 function bindFieldAutosave(inputEl, qid) {
-  const push = (val) => { queueSoftSave({ [qid]: val }); flashSaved(inputEl.parentElement); };
+  const push = (val) => { queueSoftSave({ [qid]: val }); flashSaved(inputEl); };
   if (inputEl.tagName === "SELECT") {
-    inputEl.addEventListener("change", () => push(inputEl.value));
+    const handler = () => push(inputEl.value);
+    inputEl.addEventListener("input", handler);
+    inputEl.addEventListener("change", handler);
+    inputEl.addEventListener("blur", handler);
   } else if (inputEl.tagName === "TEXTAREA" || inputEl.type === "text") {
     inputEl.addEventListener("input", () => push(inputEl.value));
   }
@@ -767,6 +770,16 @@ async function initApp() {
   function queueSoftSave(patchObj) {
     Object.assign(_softBuffer, patchObj || {});
     if (_softTimer) clearTimeout(_softTimer);
+    const savingBadge = document.getElementById("__saving_badge__") || (() => {
+      const b = document.createElement("div");
+      b.id = "__saving_badge__";
+      b.textContent = "Enregistrement…";
+      b.className = "fixed bottom-4 right-4 bg-gray-800 text-white text-xs px-3 py-1.5 rounded shadow";
+      b.style.opacity = "0"; b.style.transition = "opacity .15s";
+      document.body.appendChild(b);
+      return b;
+    })();
+    savingBadge.style.opacity = "1";
     _softTimer = setTimeout(async () => {
       const keys = Object.keys(_softBuffer);
       if (!keys.length) return;
@@ -790,6 +803,8 @@ async function initApp() {
         console.warn("Auto-save échoué :", e);
       } finally {
         for (const k of keys) delete _softBuffer[k];
+        const b = document.getElementById("__saving_badge__");
+        if (b) { setTimeout(()=>{ b.style.opacity = "0"; }, 80); }
       }
     }, 600);
   }
