@@ -132,15 +132,37 @@ function flashSaved(anchorEl) {
   } catch {}
 }
 
+function canonicalizeLikert(v) {
+  const s = String(v || "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[\u00A0\u202F\u200B]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return s;
+}
+
 function bindFieldAutosave(inputEl, qid) {
-  const push = (val) => { queueSoftSave({ [qid]: val }); flashSaved(inputEl); };
+  const push = () => {
+    let val = inputEl.value;
+    if (inputEl.tagName === "SELECT") val = canonicalizeLikert(val);
+    queueSoftSave({ [qid]: val }, inputEl);
+  };
+
   if (inputEl.tagName === "SELECT") {
-    const handler = () => push(inputEl.value);
-    inputEl.addEventListener("input", handler);
-    inputEl.addEventListener("change", handler);
-    inputEl.addEventListener("blur", handler);
+    let last = inputEl.value;
+    const pushIfChanged = () => { if (inputEl.value !== last) { last = inputEl.value; push(); } };
+    inputEl.addEventListener("change", pushIfChanged);
+    inputEl.addEventListener("input",  pushIfChanged);
+    inputEl.addEventListener("blur",   pushIfChanged);
+    inputEl.addEventListener("click",  () => setTimeout(pushIfChanged, 0));
+    inputEl.addEventListener("keyup",  (e) => {
+      if (["Enter"," ","Spacebar","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
+        setTimeout(pushIfChanged, 0);
+      }
+    });
+    inputEl.addEventListener("touchend", () => setTimeout(pushIfChanged, 0), { passive: true });
   } else if (inputEl.tagName === "TEXTAREA" || inputEl.type === "text") {
-    inputEl.addEventListener("input", () => push(inputEl.value));
+    inputEl.addEventListener("input", () => queueSoftSave({ [qid]: inputEl.value }, inputEl));
   }
 }
 
@@ -329,7 +351,8 @@ async function initApp() {
       window.__srToggles[q.id] = now;
       paint();
       // auto-save doux immédiat
-      queueSoftSave({ ["__srToggle__" + q.id]: now });
+      queueSoftSave({ ["__srToggle__" + q.id]: now }, row);
+      flashSaved(row);
     };
     paint();
     row.appendChild(label);
@@ -767,9 +790,11 @@ async function initApp() {
   // ----- AUTO-SAVE DOUX -----
   const _softBuffer = {};
   let _softTimer = null;
-  function queueSoftSave(patchObj) {
+  let _softAnchors = new Set();
+  function queueSoftSave(patchObj, anchorEl) {
     Object.assign(_softBuffer, patchObj || {});
-    if (_softTimer) clearTimeout(_softTimer);
+    if (anchorEl) _softAnchors.add(anchorEl);
+
     const savingBadge = document.getElementById("__saving_badge__") || (() => {
       const b = document.createElement("div");
       b.id = "__saving_badge__";
@@ -780,31 +805,38 @@ async function initApp() {
       return b;
     })();
     savingBadge.style.opacity = "1";
+
+    if (_softTimer) clearTimeout(_softTimer);
     _softTimer = setTimeout(async () => {
       const keys = Object.keys(_softBuffer);
       if (!keys.length) return;
+
       const selected = document.getElementById("date-select")?.selectedOptions[0];
       const mode = selected?.dataset.mode || "daily";
       const body = { apiUrl, ..._softBuffer };
-      if (mode === "daily") {
-        body._mode = "daily";
-        body._date = selected.dataset.date;
-      } else {
-        body._mode = "practice";
-        body._category = selected.dataset.category;
-      }
+      if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
+      else { body._mode = "practice"; body._category = selected.dataset.category; }
+
+      const postOnce = () => fetch(WORKER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      let ok = false;
       try {
-        await fetch(WORKER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        });
+        let res = await postOnce();
+        if (!res.ok) { await new Promise(r=>setTimeout(r,300)); res = await postOnce(); }
+        ok = res.ok;
       } catch (e) {
-        console.warn("Auto-save échoué :", e);
+        ok = false;
       } finally {
         for (const k of keys) delete _softBuffer[k];
         const b = document.getElementById("__saving_badge__");
-        if (b) { setTimeout(()=>{ b.style.opacity = "0"; }, 80); }
+        if (b) setTimeout(()=>{ b.style.opacity = "0"; }, 80);
+        if (ok) { _softAnchors.forEach(a => flashSaved(a)); }
+        else { showToast("❌ Échec de l’enregistrement auto", "red"); }
+        _softAnchors.clear();
       }
     }, 600);
   }
@@ -1113,8 +1145,8 @@ async function initApp() {
 
     const setValue = (n) => {
       window.__delayValues[key] = String(n);
-      // auto-save doux immédiat
-      queueSoftSave({ [key]: String(n) });
+      // auto-save doux immédiat avec ancre
+      queueSoftSave({ [key]: String(n) }, row);
       if (n === -1) {
         info.textContent = "Délai : annulé";
       } else {
@@ -1380,7 +1412,7 @@ async function initApp() {
         input.querySelectorAll('input[type="radio"]').forEach(r => {
           r.addEventListener("change", () => {
             const val = input.querySelector('input[type="radio"]:checked')?.value || "";
-            queueSoftSave({ [q.id]: val });
+            queueSoftSave({ [q.id]: val }, wrapper);
             flashSaved(wrapper);
           });
         });
