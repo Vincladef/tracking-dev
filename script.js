@@ -847,6 +847,9 @@ async function initApp() {
     }, 600);
   }
 
+  // ⬅️ Expose queueSoftSave au global pour que bindFieldAutosave puisse l'appeler
+  window.queueSoftSave = queueSoftSave;
+
   // Flush auto-save best-effort au déchargement
   window.addEventListener("beforeunload", () => {
     if (_softTimer) {
@@ -914,10 +917,24 @@ async function initApp() {
       del.textContent = "Supprimer";
       del.onclick = async () => {
         if (!confirm("Supprimer définitivement cette consigne ?")) return;
-        await deleteConsigne(c.id);
-        showToast("🗑️ Supprimée");
-        await loadConsignes();
-        refreshCurrentView();
+
+        // ✅ UI optimiste : on retire la ligne immédiatement
+        const rowEl = row;
+        const parent = rowEl.parentElement;
+        rowEl.remove();
+
+        try {
+          await deleteConsigne(c.id);
+          showToast("🗑️ Supprimée");
+          // Recharge léger pour rester 100% synchro avec le backend
+          await loadConsignes();
+          refreshCurrentView();
+        } catch (e) {
+          // rollback en cas d'échec réseau
+          if (parent) parent.appendChild(rowEl);
+          showToast("❌ Erreur de suppression", "red");
+          console.error(e);
+        }
       };
       btns.appendChild(del);
 
@@ -930,6 +947,8 @@ async function initApp() {
     const modal = document.getElementById("consigne-modal");
     if (!modal) return;
     const form  = document.getElementById("consigne-form");
+    let isSubmitting = false; // ⬅️ verrou anti double-submit
+    
     document.getElementById("consigne-modal-title").textContent = c ? "Modifier la consigne" : "Nouvelle consigne";
 
     form.reset();
@@ -979,6 +998,8 @@ async function initApp() {
 
     form.onsubmit = async (e) => {
       e.preventDefault();
+      if (isSubmitting) return; // ⬅️ ignore les soumissions multiples
+      isSubmitting = true;
       const daily = form.querySelector('[name="modeConsigne"][value="daily"]')?.checked !== false;
       const payload = {
         id: form.elements.id.value || null,
@@ -988,7 +1009,7 @@ async function initApp() {
         priority: parseInt(form.elements.priority.value || "2", 10),
         frequency: daily ? (readFreqMulti(document.getElementById("freq-multi")) || "Quotidien") : "pratique délibérée"
       };
-      if (!payload.label) { showToast("❌ Label requis", "red"); return; }
+      if (!payload.label) { showToast("❌ Label requis", "red"); isSubmitting = false; return; }
       // Spinner sur "Enregistrer"
       const saveBtn = modal.querySelector('button[form="consigne-form"]');
       const prev = saveBtn.innerHTML; saveBtn.disabled = true;
@@ -1032,7 +1053,11 @@ async function initApp() {
       } catch (err) {
         console.error(err);
         showToast("❌ Erreur consigne", "red");
-      } finally { saveBtn.disabled = false; saveBtn.innerHTML = prev; }
+      } finally { 
+        saveBtn.disabled = false; 
+        saveBtn.innerHTML = prev; 
+        isSubmitting = false; // ⬅️ libère le verrou
+      }
     };
 
     modal.classList.remove("hidden");
