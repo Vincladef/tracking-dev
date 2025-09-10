@@ -1493,17 +1493,84 @@ async function initApp() {
   }
 
   function renderHistory(history, container, normalize, colorMap) {
+    if (!Array.isArray(history) || history.length === 0) return;
+
+    // Bouton d'ouverture
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
-    toggleBtn.textContent = "📓 Voir l’historique des réponses";
+    toggleBtn.textContent = "📓 Voir l'historique des réponses";
 
+    // Bloc contenu (replié par défaut)
     const historyBlock = document.createElement("div");
     historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
 
-    // ... (le reste de la logique de rendu de l'historique, incluant le graphe, les stats et la liste)
-    // Pour la concision, cette partie est omise, mais vous devriez déplacer le code correspondant ici.
-    // Par exemple, le contenu de `if (q.history && q.history.length > 0)` dans la fonction originale.
+    // === Graphe Likert ===
+    const chartWrap = document.createElement("div");
+    renderLikertChart(chartWrap, history, normalize); // utilisera le scroller interne si assez de points
+    historyBlock.appendChild(chartWrap);
+
+    // === Stats rapides (facultatif mais utile) ===
+    const counts = { "oui":0, "plutot oui":0, "moyen":0, "plutot non":0, "non":0 };
+    history.forEach(e => {
+      const n = normalize(e.value);
+      if (counts[n] != null) counts[n] += 1;
+    });
+    const stats = document.createElement("div");
+    stats.className = "mt-2 text-xs text-gray-600";
+    stats.innerHTML = [
+      `Oui: ${counts["oui"]}`,
+      `Plutôt oui: ${counts["plutot oui"]}`,
+      `Moyen: ${counts["moyen"]}`,
+      `Plutôt non: ${counts["plutot non"]}`,
+      `Non: ${counts["non"]}`
+    ].join(" · ");
+    historyBlock.appendChild(stats);
+
+    // === Liste (RÉCENTS -> ANCIENS) ===
+    const ordered = orderForHistory(history);
+    const LIMIT = 10;
+    ordered.forEach((entry, idx) => {
+      const keyPretty = prettyKeyWithDate(entry);
+      const val = entry.value;
+      const n = normalize(val);
+      const line = document.createElement("div");
+      line.className = `mb-2 px-3 py-2 rounded ${colorMap[n] || "bg-gray-100 text-gray-700"}`;
+      if (idx >= LIMIT) line.classList.add("hidden", "extra-history");
+      line.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
+      historyBlock.appendChild(line);
+    });
+
+    if (ordered.length > LIMIT) {
+      const moreBtn = document.createElement("button");
+      moreBtn.type = "button";
+      moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
+      let expanded = false;
+      const rest = ordered.length - LIMIT;
+      const setLabel = () => { moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`; };
+      setLabel();
+      moreBtn.addEventListener("click", () => {
+        expanded = !expanded;
+        historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
+        setLabel();
+      });
+      historyBlock.appendChild(moreBtn);
+    }
+
+    // Toggle ouverture/fermeture
+    toggleBtn.addEventListener("click", () => {
+      const wasHidden = historyBlock.classList.contains("hidden");
+      historyBlock.classList.toggle("hidden");
+      if (wasHidden) {
+        // auto-scroll vers la droite du graphe (si overflow)
+        const sc = chartWrap._likertScroller;
+        if (sc) requestAnimationFrame(() => { sc.scrollLeft = sc.scrollWidth; });
+      }
+    });
+
+    // ⬅️ IMPORTANT : on ajoute au DOM !
+    container.appendChild(toggleBtn);
+    container.appendChild(historyBlock);
   }
 
   // Renderer commun (journalier & pratique)
