@@ -175,11 +175,11 @@ function bindFieldAutosave(inputEl, qid) {
 
 async function initApp() {
   // ✅ Mémoire des délais sélectionnés (clé -> valeur)
-  window.__delayValues = window.__delayValues || {};
+  appState.delayValues = {};
 
   // états SR en mémoire
-  window.__srToggles  = window.__srToggles || {}; // état courant (on/off) tel que l’UI l’affiche
-  window.__srBaseline = window.__srBaseline || {}; // état de référence venu du backend (pour ne POSTer que les différences)
+  appState.srToggles  = {}; // état courant (on/off) tel que l’UI l’affiche
+  appState.srBaseline = {}; // état de référence venu du backend (pour ne POSTer que les différences)
 
   // Titre dynamique
   document.getElementById("user-title").textContent =
@@ -336,11 +336,7 @@ async function initApp() {
   }
 
   function addInlineSRToggle(wrapper, q){
-    window.__srToggles  = window.__srToggles || {};
-    window.__srBaseline = window.__srBaseline || {};
     const srCurrent = q.scheduleInfo?.sr || { on:true };
-    if (!(q.id in window.__srBaseline)) window.__srBaseline[q.id] = srCurrent.on ? "on" : "off";
-    if (!(q.id in window.__srToggles))  window.__srToggles[q.id]  = srCurrent.on ? "on" : "off";
     if (!(q.id in appState.srBaseline)) appState.srBaseline[q.id] = srCurrent.on ? "on" : "off";
     if (!(q.id in appState.srToggles))  appState.srToggles[q.id]  = srCurrent.on ? "on" : "off";
     const row = document.createElement("div");
@@ -351,14 +347,11 @@ async function initApp() {
     const btn = document.createElement("button");
     btn.type = "button";
     const paint = ()=>{
-      const on = window.__srToggles[q.id] === "on";
       const on = appState.srToggles[q.id] === "on";
       btn.textContent = on ? "ON" : "OFF";
       btn.className = "px-2 py-1 rounded border text-sm " + (on ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-700 border-gray-200");
     };
     btn.onclick = ()=>{
-      const now = (window.__srToggles[q.id] === "on") ? "off" : "on";
-      window.__srToggles[q.id] = now;
       const now = (appState.srToggles[q.id] === "on") ? "off" : "on";
       appState.srToggles[q.id] = now;
       paint();
@@ -419,9 +412,6 @@ async function initApp() {
 
   function handleSelectChange() {
     // on repart propre à chaque changement
-    if (window.__delayValues) window.__delayValues = {};
-    if (window.__srToggles)   window.__srToggles   = {};
-    if (window.__srBaseline)  window.__srBaseline  = {};
     appState.delayValues = {};
     appState.srToggles   = {};
     appState.srBaseline  = {};
@@ -448,16 +438,10 @@ async function initApp() {
     const entries = Object.fromEntries(formData.entries());
 
     // ⬅️ ajoute les délais choisis via le menu
-    Object.assign(entries, window.__delayValues || {});
     Object.assign(entries, appState.delayValues);
     
     // embarquer l'état SR pour TOUTES les questions (visibles + masquées),
     // mais seulement si l'utilisateur a modifié l'état par rapport au backend
-    if (window.__srToggles && window.__srBaseline) {
-      for (const [id, onOff] of Object.entries(window.__srToggles)) {
-        if (window.__srBaseline[id] !== onOff) {
-          entries["__srToggle__" + id] = onOff; // "on" | "off"
-        }
     for (const [id, onOff] of Object.entries(appState.srToggles)) {
       if (appState.srBaseline[id] !== onOff) {
         entries["__srToggle__" + id] = onOff; // "on" | "off"
@@ -506,11 +490,7 @@ async function initApp() {
         const selected = dateSelect.selectedOptions[0];
         const mode = selected?.dataset.mode || "daily";
 
-        // on peut vider les délais mémorisés pour repartir propre
-        if (window.__delayValues) window.__delayValues = {};
-        // on repart propre aussi pour SR
-        window.__srToggles  = {};
-        window.__srBaseline = {};
+        // on repart propre
         appState.delayValues = {};
         appState.srToggles   = {};
         appState.srBaseline  = {};
@@ -1138,8 +1118,6 @@ async function initApp() {
     }
 
     // réaffiche la valeur déjà choisie si existante
-    if (window.__delayValues[key] != null) {
-      const n = parseInt(window.__delayValues[key], 10);
     if (appState.delayValues[key] != null) {
       const n = parseInt(appState.delayValues[key], 10);
       if (!Number.isNaN(n)) {
@@ -1187,7 +1165,6 @@ async function initApp() {
     pop.appendChild(grid);
 
     const setValue = (n) => {
-      window.__delayValues[key] = String(n);
       appState.delayValues[key] = String(n);
       // auto-save doux immédiat avec ancre
       queueSoftSave({ [key]: String(n) }, row);
@@ -1242,16 +1219,11 @@ async function initApp() {
     actions.appendChild(closeBtn);
 
     // --- ÉTAT SR côté front (mémoire volatile) ---
-    window.__srToggles = window.__srToggles || {}; // clé: q.id -> "on"|"off"
     // Affichage de l'état SR actuel (v. API doGet ci-dessous)
     const srCurrent = q.scheduleInfo?.sr || { on:false };
-    if (!(q.id in window.__srBaseline)) {
-      window.__srBaseline[q.id] = srCurrent.on ? "on" : "off";
     if (!(q.id in appState.srBaseline)) {
       appState.srBaseline[q.id] = srCurrent.on ? "on" : "off";
     }
-    if (!(q.id in window.__srToggles)) {
-      window.__srToggles[q.id] = srCurrent.on ? "on" : "off";
     if (!(q.id in appState.srToggles)) {
       appState.srToggles[q.id] = srCurrent.on ? "on" : "off";
     }
@@ -1261,20 +1233,15 @@ async function initApp() {
     pop.appendChild(srRow);
     const srLabel = document.createElement("span");
     srLabel.className = "text-xs text-gray-700";
-    srLabel.innerHTML = `Répétition espacée : <strong>${window.__srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>` +
     srLabel.innerHTML = `Répétition espacée : <strong>${appState.srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>` +
       (srCurrent.on && srCurrent.interval ? ` <span class="text-gray-500">(${srCurrent.unit==="iters" ? srCurrent.interval+" itér." : srCurrent.due ? "due "+srCurrent.due : srCurrent.interval+" j"})</span>` : "");
     srRow.appendChild(srLabel);
     const srBtn = document.createElement("button");
     srBtn.type = "button";
     srBtn.className = "text-xs text-blue-600 hover:underline";
-    srBtn.textContent = window.__srToggles[q.id] === "on" ? "Désactiver SR" : "Activer SR";
     srBtn.textContent = appState.srToggles[q.id] === "on" ? "Désactiver SR" : "Activer SR";
     srBtn.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      window.__srToggles[q.id] = window.__srToggles[q.id] === "on" ? "off" : "on";
-      srBtn.textContent = window.__srToggles[q.id] === "on" ? "Désactiver SR" : "Activer SR";
-      srLabel.innerHTML = `Répétition espacée : <strong>${window.__srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>`;
       appState.srToggles[q.id] = appState.srToggles[q.id] === "on" ? "off" : "on";
       srBtn.textContent = appState.srToggles[q.id] === "on" ? "Désactiver SR" : "Activer SR";
       srLabel.innerHTML = `Répétition espacée : <strong>${appState.srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>`;
