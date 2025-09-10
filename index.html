@@ -9,50 +9,90 @@
 </head>
 <body class="bg-gray-100">
 
-  <div class="max-w-5xl mx-auto p-6 mt-8 bg-white rounded-xl shadow">
-  <div class="flex items-center justify-between mb-4">
-    <h1 id="user-title" class="text-2xl font-bold">📝 Formulaire du jour</h1>
-    <div class="flex gap-2">
-      <button id="btn-home" class="px-3 py-2 text-sm bg-gray-100 rounded hover:bg-gray-200">🏠 Accueil</button>
-      <button id="btn-manage" class="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">⚙️ Consignes</button>
-    </div>
-  </div>
+  <div class="max-w-3xl mx-auto p-6 mt-8 bg-white rounded-xl shadow">
+    <h1 id="user-title" class="text-2xl font-bold mb-2">📝 Formulaire du jour</h1>
+    <p id="date-display" class="text-gray-600 mb-4"></p>
 
-  <!-- ACCUEIL -->
-  <div id="home-view" class="hidden">
-    <div id="overview" class="grid md:grid-cols-3 gap-4 mb-6"></div>
-    <div id="top-streaks" class="bg-gray-50 rounded border p-4"></div>
-  </div>
-
-  <!-- FORMULAIRES -->
-  <div id="forms-view">
     <div class="mb-4">
       <label for="date-select" class="block text-sm font-medium text-gray-700 mb-1">
         Choisis une date ou un mode pratique
       </label>
-      <select id="date-select" class="block w-full border border-gray-300 rounded px-3 py-2 bg-white text-gray-800"></select>
+      <select id="date-select" class="block w-full border border-gray-300 rounded px-3 py-2 bg-white text-gray-800">
+        </select>
     </div>
-    <div id="loader" class="text-center py-8 text-gray-500 italic">Chargement des questions en cours...</div>
-    <form id="daily-form" class="space-y-6 hidden"></form>
-    <div id="submit-section" class="mt-8 text-center hidden">
-      <button id="submitBtn" class="px-6 py-3 bg-green-600 text-white rounded hover:bg-green-700 transition">✅ Envoyer mes réponses</button>
-    </div>
-  </div>
-</div>
 
-<!-- MODAL MANAGER CONSIGNES -->
-<div id="consignes-modal" class="fixed inset-0 bg-black bg-opacity-30 hidden items-center justify-center z-50">
-  <div class="bg-white w-full max-w-3xl rounded-xl shadow-lg p-4">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-xl font-semibold">⚙️ Gérer les consignes</h2>
-      <button id="close-consignes" class="px-2 py-1 text-sm rounded bg-gray-100 hover:bg-gray-200">✖</button>
+    <div class="mb-6 flex items-center justify-between">
+      <h2 class="text-xl font-semibold">⚙️ Gérer mes consignes</h2>
+      <button id="new-consigne-btn" class="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+        ➕ Nouvelle consigne
+      </button>
     </div>
-    <div class="mb-3">
-      <button id="add-consigne" class="px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700">➕ Ajouter</button>
+
+    <!-- Panneau consignes -->
+    <div id="consignes-panel" class="mb-8 bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div class="px-4 py-2 bg-gray-50 border-b">
+        <span class="text-sm text-gray-600">Création, modification, archivage / suppression</span>
+      </div>
+      <div id="consignes-list" class="divide-y"></div>
     </div>
-    <div id="consignes-list" class="divide-y"></div>
+
+    <div id="loader" class="text-center py-8 text-gray-500 italic">
+      Chargement des questions en cours...
+    </div>
+
+    <form id="daily-form" class="space-y-6 hidden">
+      </form>
+
+    <div id="submit-section" class="mt-8 text-center hidden">
+      <button id="submitBtn" class="px-6 py-3 bg-green-600 text-white rounded hover:bg-green-700 transition">
+        ✅ Envoyer mes réponses
+      </button>
+    </div>
   </div>
-</div>
+
+  <!-- Modal création / édition -->
+  <div id="consigne-modal" class="fixed inset-0 bg-black bg-opacity-30 hidden z-50">
+    <div class="max-w-lg mx-auto mt-24 bg-white rounded-xl shadow p-5">
+      <h3 id="consigne-modal-title" class="text-lg font-semibold mb-3">Nouvelle consigne</h3>
+      <form id="consigne-form" class="space-y-3">
+        <input type="hidden" name="id" />
+        <div>
+          <label class="text-sm text-gray-700">Label</label>
+          <input name="label" class="mt-1 w-full border rounded px-3 py-2" required />
+        </div>
+        <div>
+          <label class="text-sm text-gray-700">Catégorie</label>
+          <input name="category" class="mt-1 w-full border rounded px-3 py-2" required />
+        </div>
+        <div>
+          <label class="text-sm text-gray-700">Type</label>
+          <select name="type" class="mt-1 w-full border rounded px-3 py-2">
+            <option>Oui/Non</option>
+            <option>Likert/Menu</option>
+            <option>Plus long</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-sm text-gray-700">Priorité</label>
+          <select name="priority" class="mt-1 w-full border rounded px-3 py-2">
+            <option value="1">P1</option>
+            <option value="2" selected>P2</option>
+            <option value="3">P3</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-sm text-gray-700">Fréquence</label>
+          <input name="frequency" class="mt-1 w-full border rounded px-3 py-2" value="Pratique délibérée" />
+          <p class="text-xs text-gray-500 mt-1">Par défaut: <em>Pratique délibérée</em></p>
+        </div>
+
+        <div class="pt-2 flex items-center justify-end gap-2">
+          <button type="button" id="consigne-cancel" class="px-3 py-2 border rounded">Annuler</button>
+          <button type="submit" class="px-3 py-2 bg-green-600 text-white rounded">Enregistrer</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <div class="hidden text-orange-600 text-green-600 text-yellow-600 text-red-600 text-gray-500 text-gray-700"></div>
 

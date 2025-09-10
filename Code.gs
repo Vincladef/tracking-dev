@@ -40,6 +40,13 @@ function _cors(out) {
 function json(o) { return _cors(ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON)); }
 function text(s) { return _cors(ContentService.createTextOutput(String(s)).setMimeType(ContentService.MimeType.TEXT)); }
 
+// Évite l'interprétation UTC de "YYYY-MM-DD"
+function parseISODateLocal(s) {
+  var m = String(s || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])); // minuit local
+}
+
 // ============================
 //  doGet — lecture
 // ============================
@@ -84,6 +91,7 @@ function doGet(e) {
       const cat = row[1] || "";    // B
 
       const freq = clean(freqRaw);
+      if (freq.includes("archiv")) continue; // ignorer les consignes archivées
       if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) continue; // exclure pratique
 
       const isQuotidien = freq.includes("quotidien");
@@ -154,6 +162,7 @@ function doGet(e) {
         const freq = clean(row[FREQ_COL]);
         const cat = (row[CAT_COL] || "").toString().trim();
         if (!cat) return;
+        if (freq.includes("archiv")) return; // exclure archivées
         if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) {
           categoriesSet[cat] = true;
         }
@@ -170,6 +179,7 @@ function doGet(e) {
       const freq = clean(row[FREQ_COL]);
       const cat = (row[CAT_COL] || "").toString().trim();
       if (!cat || cat !== selectedCat) return;
+      if (freq.includes("archiv")) return; // exclure archivées
       if (!(freq.includes("pratique deliberee") || freq.includes("pratique délibérée"))) return;
 
       const type = row[TYPE_COL] || "";
@@ -217,7 +227,8 @@ function doGet(e) {
 
   // ---------- MODE JOURNALIER (inchangé) ----------
   const queryDate = e?.parameter?.date;
-  const referenceDate = queryDate ? new Date(queryDate) : new Date();
+  let referenceDate = queryDate ? parseISODateLocal(queryDate) : new Date();
+  if (!referenceDate) referenceDate = new Date();
   const refDayName = referenceDate.toLocaleDateString("fr-FR", { weekday: "long" }).toLowerCase();
 
   const today = new Date();
@@ -254,6 +265,7 @@ function doGet(e) {
     const cat = row[1] || "";    // B
 
     const freq = clean(freqRaw);
+    if (freq.includes("archiv")) continue; // exclure archivées
     const isQuotidien = freq.includes("quotidien");
     const isSpaced = freq.includes("repetition espacee") || freq.includes("répétition espacée");
 
@@ -373,16 +385,17 @@ function doPost(e) {
 
     if (clean(data._action) === "consigne_create") {
       const lastRow = sheet.getLastRow()+1;
+      const defaultFreq = data.frequency || "Pratique délibérée";
       sheet.getRange(lastRow, 1).setValue(""); // ancre
       sheet.getRange(lastRow, 2).setValue(data.category || "");
       sheet.getRange(lastRow, 3).setValue(data.type || "");
-      sheet.getRange(lastRow, 4).setValue(data.frequency || "");
+      sheet.getRange(lastRow, 4).setValue(defaultFreq);
       sheet.getRange(lastRow, 5).setValue(data.label || "");
       const anchor = sheet.getRange(lastRow, 1);
       ensureRowId(anchor);
       setPriority(anchor, parseInt(data.priority,10)||2);
       // SR ON par défaut : en jours pour le quotidien/jours/sr, en itérations pour la pratique délibérée
-      const f = clean(data.frequency || "");
+      const f = clean(defaultFreq);
       const unit = (f.includes("pratique deliberee") || f.includes("pratique délibérée")) ? "iters" : "days";
       setSRToggle(anchor, true, unit);
       return text("✅ consigne créée");
@@ -595,6 +608,7 @@ function sendAllTelegramReminders() {
       if (data.length > 0) {
         data.forEach((r, i) => {
           const freq = clean(r[3]);
+          if (freq.includes("archiv")) return; // exclure archivées
 
           // ❌ Exclure la pratique délibérée des rappels quotidiens
           if (freq.includes("pratique deliberee") || freq.includes("pratique délibérée")) return;
@@ -652,4 +666,26 @@ function sendAllTelegramReminders() {
       Logger.log(`Erreur pour ${user} : ${e}`);
     }
   });
+}
+
+// ============================
+//  Migration optionnelle
+// ============================
+function migrateAllToPracticeDeliberee() {
+  const sh = SpreadsheetApp.getActive().getSheetByName('Tracking');
+  const lr = sh.getLastRow();
+  if (lr < 2) return;
+  const values = sh.getRange(2,1,lr-1,5).getValues(); // A..E
+  for (let i=0;i<values.length;i++){
+    const row = 2+i;
+    const freqCell = sh.getRange(row,4);
+    const label = values[i][4];
+    const freq = (values[i][3]||"").toString().toLowerCase();
+    if (!label) continue;
+    if (freq.includes("archiv")) continue; // ne pas toucher aux archivées
+    // forcer Pratique délibérée + SR iters ON
+    freqCell.setValue("Pratique délibérée");
+    const anchor = sh.getRange(row,1);
+    setSRToggle(anchor, true, "iters");
+  }
 }

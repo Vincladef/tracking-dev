@@ -1,6 +1,4 @@
-// SCRIPT.JS - 🧑 Identifier l’utilisateur depuis l’URL
-if (window.__APP_ALREADY_WIRED__) { throw new Error("Script chargé deux fois"); }
-window.__APP_ALREADY_WIRED__ = true;
+// 🧑 Identifier l’utilisateur depuis l’URL
 const urlParams = new URLSearchParams(location.search);
 const user = urlParams.get("user")?.toLowerCase();
 
@@ -9,36 +7,13 @@ if (!user) {
   throw new Error("Utilisateur manquant");
 }
 
-// Masquer TOUT DE SUITE les boutons (pas d'attente de initApp)
-function hideNavEarly() {
-  const kill = (id) => document.getElementById(id)?.closest("button, a, li, div")?.remove?.();
-  kill("btn-home");
-  kill("btn-manage");
-}
-hideNavEarly();
-document.addEventListener("DOMContentLoaded", hideNavEarly);
-
-(function showUserInTitle(){
-  const h1 = document.getElementById("user-title");
-  if (!h1 || !user) return;
-  const chip = document.createElement("span");
-  const pretty = user.charAt(0).toUpperCase() + user.slice(1);
-  chip.className = "ml-3 text-sm px-2 py-0.5 rounded bg-gray-100 text-gray-700";
-  chip.textContent = pretty;
-  h1.appendChild(chip);
-  document.title = `Formulaire du jour — ${pretty}`;
-})();
-
 // 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
 const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
 
 let apiUrl = null;
 
-const cfgAbort = new AbortController();
-const cfgTimer = setTimeout(() => cfgAbort.abort(), 10000);
-fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}&ts=${Date.now()}`, { signal: cfgAbort.signal, cache: "no-store" })
+fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
   .then(async res => {
-    clearTimeout(cfgTimer);
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
       throw new Error(`Erreur HTTP lors de la récupération de la config : ${res.status} — ${txt.slice(0, 200)}`);
@@ -64,101 +39,7 @@ fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}&ts=${Date.now()}`, { signa
   .catch(err => {
     showToast("❌ Erreur lors du chargement de la configuration.", "red");
     console.error("Erreur attrapée :", err);
-  })
-  .finally(() => clearTimeout(cfgTimer));
-
-async function postJSON(payload, { retries = 2, baseDelay = 400 } = {}) {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(apiUrl, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-
-      // OK -> on renvoie
-      if (res.status !== 429 && res.status !== 503) return res;
-
-      // 429/503 -> backoff et retry
-      if (attempt === retries) return res;
-      const retryAfterHeader = res.headers.get("Retry-After");
-      const retryAfterMs = Number.isFinite(parseInt(retryAfterHeader, 10))
-        ? parseInt(retryAfterHeader, 10) * 1000
-        : baseDelay * Math.pow(2, attempt);
-      await new Promise(r => setTimeout(r, retryAfterMs));
-      continue;
-    } catch (err) {
-      // Exception réseau -> backoff et retry
-      if (attempt === retries) throw err;
-      await new Promise(r => setTimeout(r, baseDelay * Math.pow(2, attempt)));
-    }
-  }
-}
-
-// helper pour éviter le double fire par consigne
-const __prioBusy = new Set();
-
-// ---- Builder du sélecteur combiné (semaine + pratique) ----
-async function buildCombinedSelect() {
-  const sel = document.getElementById("date-select");
-  if (!sel) return;
-  const prev = sel.value;           // ⬅️ mémorise
-  sel.innerHTML = "";
-
-  const today = new Date();
-  const start = new Date(today);
-  const day = start.getDay();                 // 0=dim ... 1=lun
-  const offsetToMon = (day === 0 ? -6 : 1 - day);
-  start.setDate(start.getDate() + offsetToMon);
-
-  const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-  const fmtISO = isoLocal;
-  const fmtFR  = d => d.toLocaleDateString("fr-FR", { weekday:"short", day:"2-digit", month:"2-digit" });
-
-  const ogWeek = document.createElement("optgroup");
-  ogWeek.label = "Semaine";
-  for (let i=0;i<7;i++){
-    const d = new Date(start); d.setDate(start.getDate()+i);
-    ogWeek.appendChild(new Option(`${fmtFR(d)}`, fmtISO(d)));
-  }
-  sel.appendChild(ogWeek);
-
-  const ogPrac = document.createElement("optgroup");
-  ogPrac.label = "Pratique délibérée";
-  try {
-    const res = await fetch(`${apiUrl}?mode=practice&ts=${Date.now()}`, { cache:"no-store" });
-    const cats = res.ok ? await res.json() : [];
-    cats.forEach(cat => ogPrac.appendChild(new Option(`Pratique — ${cat}`, `practice:${cat}`)));
-  } catch(_) {}
-  sel.appendChild(ogPrac);
-
-  const todayISO = fmtISO(today);
-  // ⬅️ si l'ancienne valeur existe encore, on la remet
-  if (Array.from(sel.options).some(o => o.value === prev)) {
-    sel.value = prev;
-  } else if (Array.from(sel.options).some(o => o.value === todayISO)) {
-    sel.value = todayISO;
-  } else {
-    sel.add(new Option(todayISO, todayISO), 0);
-    sel.value = todayISO;
-  }
-}
-
-// ---- Chargement pratique ----
-async function loadPractice(category) {
-  try {
-    __loadAbort?.abort?.();
-    __loadAbort = new AbortController();
-    const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}&ts=${Date.now()}`, { signal: __loadAbort.signal, cache:"no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const questions = await res.json();
-    window.__lastQuestions = questions;
-    renderQuestions(questions);
-  } catch(e){
-    if (e.name === "AbortError") return;
-    console.error(e);
-    showToast("❌ Erreur chargement (pratique)", "red");
-  }
-}
+  });
 
 // ---- Toast minimal (non bloquant) ----
 function ensureToast() {
@@ -169,8 +50,6 @@ function ensureToast() {
     t.className = "fixed top-4 right-4 hidden z-50";
     document.body.appendChild(t);
   }
-  t.setAttribute("role", "status");
-  t.setAttribute("aria-live", "polite");
   return t;
 }
 
@@ -184,455 +63,887 @@ function showToast(message, tone = "green") {
   t._hideTimer = setTimeout(() => t.classList.add("hidden"), 2400);
 }
 
-const PRIO = {
-  1: { text: "Haute",   badge: "bg-red-100 text-red-700" },
-  2: { text: "Normale", badge: "bg-gray-100 text-gray-800" },
-  3: { text: "Basse",   badge: "bg-green-100 text-green-700" }
-};
-function prioritySelect(value=2){
-  const s = document.createElement("select");
-  s.className = "text-sm border rounded px-2 py-1 bg-white";
-  [["1","Haute"],["2","Normale"],["3","Basse"]].forEach(([v,t])=>{
-    const o = document.createElement("option"); o.value=v; o.textContent=t; if (String(value)===v) o.selected=true; s.appendChild(o);
-  });
-  return s;
-}
+async function initApp() {
+  // ✅ Mémoire des délais sélectionnés (clé -> valeur)
+  window.__delayValues = window.__delayValues || {};
 
-function addSROnlyUI(wrapper, q) {
-  const row = document.createElement("div");
-  row.className = "mt-2 flex items-center gap-3";
+  // états SR en mémoire
+  window.__srToggles  = window.__srToggles || {}; // état courant (on/off) tel que l’UI l’affiche
+  window.__srBaseline = window.__srBaseline || {}; // état de référence venu du backend (pour ne POSTer que les différences)
 
-  window.__srToggles  = window.__srToggles  || {};
-  window.__srBaseline = window.__srBaseline || {};
-  const srCurrent = q.scheduleInfo?.sr || { on:false };
-  if (!(q.id in window.__srBaseline)) window.__srBaseline[q.id] = srCurrent.on ? "on":"off";
-  if (!(q.id in window.__srToggles))  window.__srToggles[q.id]  = srCurrent.on ? "on":"off";
+  // Titre dynamique
+  document.getElementById("user-title").textContent =
+    `📝 Formulaire du jour – ${user.charAt(0).toUpperCase() + user.slice(1)}`;
 
-  const label = document.createElement("span");
-  label.className = "text-sm text-gray-700";
-  label.textContent = "⏱️ Répétition espacée";
-  row.appendChild(label);
+  // On enlève l’ancien affichage de date (non nécessaire avec le sélecteur)
+  const dateDisplay = document.getElementById("date-display");
+  if (dateDisplay) dateDisplay.remove();
 
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.setAttribute("role", "switch");
-  btn.setAttribute("tabindex", "0");
-  const refresh = () => {
-    const on = window.__srToggles[q.id] === "on";
-    btn.className = "text-sm px-2 py-1 rounded " + (on ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-800");
-    btn.textContent = on ? "ON" : "OFF";
-    btn.setAttribute("aria-checked", on ? "true" : "false");
-  };
-  btn.addEventListener("click", () => {
-    window.__srToggles[q.id] = (window.__srToggles[q.id] === "on" ? "off" : "on");
-    refresh();
-  });
-  btn.addEventListener("keydown", (e) => {
-    if (e.key === " " || e.key === "Enter") { e.preventDefault(); btn.click(); }
-  });
-  refresh();
-  row.appendChild(btn);
+  // Références éléments existants
+  const dateSelect = document.getElementById("date-select");
+  dateSelect.classList.add("mb-4");
 
-  if (q.scheduleInfo?.sr?.interval || q.scheduleInfo?.sr?.due) {
-    const meta = document.createElement("span");
-    meta.className = "text-xs text-gray-500";
-    const sr = q.scheduleInfo.sr;
-    meta.textContent = sr.unit==="iters"
-      ? `(${sr.interval||0} itérations)`
-      : (sr.due ? `(prochaine ${sr.due})` : `(${sr.interval||0} j)`);
-    row.appendChild(meta);
-  }
+  // ➡️ Remplir le select avec : Dates (7j) + (optionnel) Mode pratique — catégories
+  async function buildCombinedSelect() {
+    console.log("🛠️ Création du sélecteur de date et de mode...");
+    const sel = document.getElementById("date-select");
+    sel.innerHTML = "";
 
-  wrapper.appendChild(row);
-}
+    // Placeholder
+    const ph = document.createElement("option");
+    ph.disabled = true; ph.hidden = true; ph.selected = true;
+    ph.textContent = "Choisis une date ou un mode pratique…";
+    sel.appendChild(ph);
 
-function strongText(txt){
-  const s = document.createElement("strong");
-  s.textContent = txt ?? "";
-  return s;
-}
-
-function yesNoGroup(name, current) {
-  const wrap = document.createElement("div");
-  wrap.className = "space-x-6 text-gray-700";
-  [["Oui","Oui"],["Non","Non"]].forEach(([val, txt]) => {
-    const lab = document.createElement("label");
-    const r = document.createElement("input");
-    r.type = "radio"; r.name = name; r.value = val; r.className = "mr-1";
-    if (current === val) r.checked = true;
-    lab.appendChild(r); lab.append(txt);
-    wrap.appendChild(lab);
-  });
-  return wrap;
-}
-
-function moveCardToGroup(cardEl, newP){
-  const container = document.getElementById("daily-form");
-  if (!container || !cardEl) return;
-  const groups = {
-    1: container.querySelector('[data-group="p1"]'),
-    2: container.querySelector('[data-group="p2"]'),
-    3: container.querySelector('[data-group="p3"]')
-  };
-  if (groups[newP]) {
-    groups[newP].appendChild(cardEl);
-  } else {
-    // fallback simple: re-render si le groupe n'existe pas encore
-    window.handleSelectChange?.();
-  }
-}
-
-const TYPE_OPTIONS = [
-  "Oui/Non",
-  "Menu (Likert 5)",
-  "Texte court",
-  "Texte (plus long)"
-];
-const FREQ_OPTIONS = [
-  "Quotidien",
-  "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche",
-  "Répétition espacée",
-  "Pratique délibérée"
-];
-async function getAllCategories(){
-  if (window.__allCategories) return window.__allCategories;
-  try{
-    const res = await fetch(`${apiUrl}?mode=consignes&ts=${Date.now()}`, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const rows = await res.json();
-    const set = new Set(rows.map(r => (r.category || "").trim()).filter(Boolean));
-    window.__allCategories = Array.from(set).sort();
-  }catch(e){ window.__allCategories = []; }
-  return window.__allCategories;
-}
-function consigneEditorForm(defaults, categories){
-  const c = Object.assign({ category:"", type:"", frequency:"", label:"", priority:2 }, defaults||{});
-  const cats = Array.isArray(categories) ? categories : [];
-  const box = document.createElement("div");
-  box.className = "consigne-editor mt-2 p-4 rounded-lg border bg-white shadow";
-  box.innerHTML = `
-    <div class="grid md:grid-cols-2 gap-3">
-      <div>
-        <label class="block text-xs text-gray-600 mb-1">Catégorie</label>
-        <select class="ce-cat border rounded px-2 py-1 w-full bg-white"></select>
-        <input class="ce-cat-other border rounded px-2 py-1 w-full mt-2 hidden" placeholder="Nouvelle catégorie">
-      </div>
-      <div>
-        <label class="block text-xs text-gray-600 mb-1">Type</label>
-        <select class="ce-type border rounded px-2 py-1 w-full bg-white"></select>
-      </div>
-      <div>
-        <label class="block text-xs text-gray-600 mb-1">Fréquence</label>
-        <select class="ce-freq border rounded px-2 py-1 w-full bg-white"></select>
-      </div>
-      <div>
-        <label class="block text-xs text-gray-600 mb-1">Priorité</label>
-        <span class="ce-prio"></span>
-      </div>
-    </div>
-    <label class="block text-xs text-gray-600 mb-1 mt-3">Intitulé</label>
-    <input class="ce-label border rounded px-2 py-1 w-full" placeholder="Ex. : As-tu pris 15 minutes pour lire un peu aujourd’hui ?">
-    <div class="mt-3 flex gap-2">
-      <button class="ce-save px-3 py-1 rounded bg-green-600 text-white">Enregistrer</button>
-      <button class="ce-cancel px-3 py-1 rounded bg-gray-100">Annuler</button>
-    </div>
-  `;
-  const prioMount = box.querySelector(".ce-prio");
-  const sel = prioritySelect(c.priority||2);
-  prioMount.appendChild(sel);
-  const ceLabel = box.querySelector(".ce-label");
-  const catSel = box.querySelector(".ce-cat");
-  const typeSel = box.querySelector(".ce-type");
-  const freqSel = box.querySelector(".ce-freq");
-  const catOther = box.querySelector(".ce-cat-other");
-
-  ceLabel.value = c.label || "";
-  function setOptions(select, opts, selected) {
-    select.innerHTML = "";
-    select.add(new Option("— Choisir —", ""));
-    opts.forEach(v => select.add(new Option(v, v, false, v === selected)));
-  }
-  setOptions(typeSel, TYPE_OPTIONS, c.type);
-  // Multi-select pour la fréquence (CSV)
-  freqSel.multiple = true;
-  freqSel.size = Math.min(FREQ_OPTIONS.length, 9);
-  const selectedFreqs = String(c.frequency || "")
-    .split(/[,\u2022]/)
-    .map(s => s.trim())
-    .filter(Boolean);
-  freqSel.innerHTML = "";
-  FREQ_OPTIONS.forEach(v => {
-    const opt = new Option(v, v, false, selectedFreqs.includes(v));
-    freqSel.add(opt);
-  });
-  // toggle sans Ctrl/Cmd :
-  freqSel.addEventListener("mousedown", (e) => {
-    if (e.target.tagName === "OPTION") {
-      e.preventDefault();
-      e.target.selected = !e.target.selected;
-      freqSel.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-  });
-  // exclusivité "Pratique délibérée"
-  freqSel.addEventListener("change", () => {
-    const vals = Array.from(freqSel.selectedOptions).map(o => o.value);
-    if (vals.includes("Pratique délibérée") && vals.length > 1) {
-      Array.from(freqSel.options).forEach(o => o.selected = (o.value === "Pratique délibérée"));
-    }
-  });
-  // Catégories + entrée autre
-  catSel.innerHTML = "";
-  catSel.add(new Option("— Choisir —", ""));
-  cats.forEach(k => catSel.add(new Option(k, k, false, k === c.category)));
-  catSel.add(new Option("Nouvelle catégorie…", "__other__", false, c.category === "__other__"));
-  const syncCatOther = () => {
-    const v = catSel.value;
-    if (v === "__other__") { catOther.classList.remove("hidden"); catOther.focus(); }
-    else { catOther.classList.add("hidden"); }
-  };
-  catSel.addEventListener("change", syncCatOther);
-  syncCatOther();
-  box._get = () => {
-    const catValue = catSel.value === "__other__"
-      ? (catOther.value || "").trim()
-      : (catSel.value || "").trim();
-    return {
-      category: catValue,
-      type:     box.querySelector(".ce-type").value,
-      frequency:Array.from(freqSel.selectedOptions).map(o => o.value).join(", "),
-      label:    box.querySelector(".ce-label").value,
-      priority: parseInt(sel.value,10)
-    };
-  };
-  const onCancel = () => box.remove();
-  box.querySelector(".ce-cancel").addEventListener("click", onCancel);
-  box.querySelector(".ce-save").addEventListener("click", async ()=>{
-    const saveBtn = box.querySelector(".ce-save");
-    saveBtn.disabled = true;
-    const vals = box._get();
-    if (!vals.label.trim() || !vals.type || !vals.frequency) {
-      showToast("⚠️ Complète au moins Intitulé, Type et Fréquence", "blue");
-      saveBtn.disabled = false;
-      return;
-    }
-    try{
-      const payload = defaults?.id
-        ? { _action:"consigne_update", id: defaults.id, category: vals.category, type: vals.type, frequency: vals.frequency, newLabel: vals.label, priority: vals.priority }
-        : { _action:"consigne_create", category: vals.category, type: vals.type, frequency: vals.frequency, label: vals.label, priority: vals.priority };
-      const res = await postJSON(payload);
-      const txt = await res.text().catch(()=> "");
-      if (!res.ok || (txt && txt.startsWith("❌"))) throw new Error(txt || `HTTP ${res.status}`);
-      showToast(defaults?.id ? "✅ Consigne mise à jour" : "✅ Consigne créée");
-      window.__allCategories = null;
-      box.remove();
-      window.handleSelectChange?.();
-      window.rebuildSelector?.();
-    }catch(e){
-      showToast("❌ Erreur enregistrement", "red");
-      console.error(e);
-    }finally{
-      saveBtn.disabled = false;
-    }
-  });
-  return box;
-}
-async function openConsigneEditorInline(mountEl, qOrNull){
-  document.querySelectorAll(".consigne-editor").forEach(el => el.remove());
-  const ph = document.createElement("div");
-  ph.className = "consigne-editor mt-2 p-4 rounded-lg border bg-white shadow";
-  ph.innerHTML = '<div class="animate-pulse space-y-3"><div class="h-4 bg-gray-200 rounded w-32"></div><div class="h-8 bg-gray-200 rounded"></div><div class="h-8 bg-gray-200 rounded"></div><div class="h-8 bg-gray-200 rounded"></div></div>';
-  mountEl.appendChild(ph);
-
-  const cats = await getAllCategories();
-  const isUpdate = !!qOrNull?.id;
-  const form = consigneEditorForm(
-    isUpdate ? {
-      category: qOrNull.category, type: qOrNull.type, frequency: qOrNull.frequency,
-      label: qOrNull.label, priority: qOrNull.priority
-    } : {},
-    cats
-  );
-  ph.replaceWith(form);
-  setTimeout(() => form.querySelector(".ce-label")?.focus(), 0);
-}
-
-function consigneRow(c){
-  const tag = PRIO[c.priority||2] || PRIO[2];
-  const row = document.createElement("div");
-  row.className = "py-3 flex items-center justify-between";
-  const left = document.createElement("div"); left.className = "min-w-0";
-  const t1 = document.createElement("div"); t1.className = "font-medium truncate"; t1.textContent = c.label || "";
-  const t2 = document.createElement("div"); t2.className = "text-sm text-gray-500 truncate"; t2.textContent = [c.category, c.type, c.frequency].filter(Boolean).join(" • ");
-  left.append(t1, t2);
-  const right = document.createElement("div"); right.className = "flex items-center gap-2";
-  const b = document.createElement("span"); b.className = `text-xs px-2 py-0.5 rounded ${tag.badge}`; b.textContent = tag.text;
-  const edit = document.createElement("button"); edit.className = "edit px-2 py-1 text-sm rounded bg-blue-600 text-white"; edit.dataset.id = c.id; edit.textContent = "Éditer";
-  const del = document.createElement("button"); del.className = "del px-2 py-1 text-sm rounded bg-red-600 text-white"; del.dataset.id = c.id; del.textContent = "Suppr.";
-  right.append(b, edit, del);
-  row.append(left, right);
-  return row.outerHTML; // conserve l’API qui renvoie une string si c’était utilisé ainsi
-}
-
-function renderQuestions(questions) {
-  const container = document.getElementById("daily-form");
-  container.innerHTML = "";
-  console.log(`✍️ Rendu de ${questions.length} question(s)`);
-  const addBar = document.createElement("div");
-  addBar.className = "mb-4";
-  const addBtn = document.createElement("button");
-  addBtn.type = "button";
-  addBtn.className = "px-3 py-2 rounded bg-green-600 text-white shadow hover:bg-green-700";
-  addBtn.textContent = "➕ Ajouter une consigne";
-  const addMount = document.createElement("div");
-  addMount.id = "add-consigne-mount";
-  addMount.className = "mt-3";
-  addBar.appendChild(addBtn);
-  addBar.appendChild(addMount);
-  addBtn.addEventListener("click", () => {
-    const prevHTML = addBtn.innerHTML;
-    addBtn.disabled = true;
-    addBtn.innerHTML = '<span class="inline-block animate-spin mr-2 border-2 border-gray-300 border-t-transparent rounded-full w-4 h-4 align-[-2px]"></span>Chargement...';
-    openConsigneEditorInline(addMount, null).finally(() => {
-      addBtn.disabled = false;
-      addBtn.innerHTML = prevHTML;
+    // Groupe Dates
+    const ogDates = document.createElement("optgroup");
+    ogDates.label = "Dates (7 derniers jours)";
+    const pastDates = [...Array(7)].map((_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      return {
+        value: d.toISOString().split("T")[0],
+        label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
+      };
     });
-    addMount.scrollIntoView({ behavior: "smooth", block: "center" });
-  });
-  container.appendChild(addBar);
+    pastDates.forEach(opt => {
+      const o = document.createElement("option");
+      o.textContent = opt.label.charAt(0).toUpperCase() + opt.label.slice(1);
+      o.dataset.mode = "daily";
+      o.dataset.date = opt.value; // YYYY-MM-DD
+      ogDates.appendChild(o);
+    });
+    sel.appendChild(ogDates);
 
-  const visible = [], hiddenSR = [];
-  (questions||[]).forEach(q => (q.skipped ? hiddenSR : visible).push(q));
+    // Groupe Mode pratique (si dispo)
+    try {
+      const res = await fetch(`${apiUrl}?mode=practice`);
+      const cats = await res.json();
+      if (Array.isArray(cats) && cats.length) {
+        // Séparateur visuel (dans un optgroup valide)
+        const sepGroup = document.createElement("optgroup");
+        sepGroup.label = "────────";
+        sel.appendChild(sepGroup);
 
-  visible.sort((a,b)=> (a.priority||2)-(b.priority||2));
-
-  const p1 = visible.filter(q => (q.priority||2) === 1);
-  const p2 = visible.filter(q => (q.priority||2) === 2);
-  const p3 = visible.filter(q => (q.priority||2) === 3);
-
-  const renderGroup = (arr, {title, style, collapsed, groupKey}) => {
-    const block = document.createElement("div");
-    block.className = "mb-6";
-    const header = document.createElement("div");
-    header.className = "mb-3 flex items-center gap-2";
-    const hdrBadge = document.createElement("span");
-    hdrBadge.className = `text-sm font-semibold ${style.badge} px-2 py-0.5 rounded`;
-    hdrBadge.textContent = title;
-    header.appendChild(hdrBadge);
-    block.appendChild(header);
-
-    const body = document.createElement(collapsed ? "details" : "div");
-    if (groupKey) body.dataset.group = groupKey;
-    if (collapsed) {
-      body.className = "rounded border";
-      const sum = document.createElement("summary");
-      sum.className = "cursor-pointer select-none px-3 py-2 text-gray-800";
-      sum.textContent = "Afficher les consignes secondaires";
-      body.appendChild(sum);
+        const ogPractice = document.createElement("optgroup");
+        ogPractice.label = "Mode pratique — catégories";
+        cats.forEach(cat => {
+          const o = document.createElement("option");
+          o.textContent = `Mode pratique — ${cat}`;
+          o.dataset.mode = "practice";
+          o.dataset.category = cat;
+          ogPractice.appendChild(o);
+        });
+        sel.appendChild(ogPractice);
+      }
+    } catch (e) {
+      console.warn("Impossible de charger les catégories de pratique", e);
     }
 
-    arr.forEach(q => {
-      const wrap = document.createElement("div");
-      wrap.className = `mb-4 p-4 rounded-lg shadow-sm ${style.card}`;
+    // Sélectionner automatiquement la première date
+    const firstDate = ogDates.querySelector("option");
+    if (firstDate) {
+      ph.selected = false;
+      firstDate.selected = true;
+    }
+    console.log("✅ Sélecteur de mode et de date prêt.");
+  }
+
+  // Ordonne l'historique pour l'affichage en liste: RÉCENT -> ANCIEN
+  function orderForHistory(hist) {
+    const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+    const iterRe = /\b(\d+)\s*\(/;
+    const toKey = (e, idx) => {
+      if (Number.isFinite(e.colIndex)) return { k:e.colIndex, kind:"col" };
+      if (e.date && dateRe.test(e.date)) {
+        const [,d,m,y] = e.date.match(dateRe); return { k:new Date(`${y}-${m}-${d}`).getTime(), kind:"time" };
+      }
+      if (e.key && dateRe.test(e.key)) {
+        const [,d,m,y] = e.key.match(dateRe); return { k:new Date(`${y}-${m}-${d}`).getTime(), kind:"time" };
+      }
+      if (e.key && iterRe.test(e.key)) return { k:parseInt(e.key.match(iterRe)[1],10), kind:"iter" };
+      return { k:idx, kind:"idx" };
+    };
+    return (Array.isArray(hist)?hist:[])
+      .map((e,i)=>({e,key:toKey(e,i)}))
+      .sort((a,b)=>{
+        if (a.key.kind==="col" && b.key.kind==="col") return a.key.k - b.key.k; // plus petit = plus récent
+        return b.key.k - a.key.k; // RÉCENT -> ANCIEN pour time/iter
+      })
+      .map(x=>x.e);
+  }
+
+  function scrollToRight(el) {
+    if (!el) return;
+    requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
+  }
+
+  function prettyKeyWithDate(entry) {
+    const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+    const fullDate = (entry.date && dateRe.test(entry.date))
+      ? entry.date
+      : (entry.key && dateRe.test(entry.key) ? entry.key.match(dateRe)[0] : "");
+    const title = entry.date ? (entry.key || entry.date) : (entry.key || "");
+    return fullDate ? `${title} (${fullDate})` : title;
+  }
+
+  await buildCombinedSelect();
+
+  // État initial
+  handleSelectChange();
+
+  dateSelect.addEventListener("change", handleSelectChange);
+
+  function handleSelectChange() {
+    // on repart propre à chaque changement
+    if (window.__delayValues) window.__delayValues = {};
+    if (window.__srToggles)   window.__srToggles   = {};
+    if (window.__srBaseline)  window.__srBaseline  = {};
+
+    const sel = document.getElementById("date-select");
+    if (!sel || !sel.selectedOptions.length) return;
+    const selected = sel.selectedOptions[0];
+    const mode = selected.dataset.mode || "daily";
+    if (mode === "daily") {
+      console.log(`➡️ Changement de mode : Journalier, date=${selected.dataset.date}`);
+      loadFormForDate(selected.dataset.date);
+    } else {
+      console.log(`➡️ Changement de mode : Pratique, catégorie=${selected.dataset.category}`);
+      loadPracticeForm(selected.dataset.category);
+    }
+  }
+
+  // 📨 Soumission
+  document.getElementById("submitBtn").addEventListener("click", (e) => {
+    e.preventDefault();
+
+    const form = document.getElementById("daily-form");
+    const formData = new FormData(form);
+    const entries = Object.fromEntries(formData.entries());
+
+    // ⬅️ ajoute les délais choisis via le menu
+    Object.assign(entries, window.__delayValues || {});
+    
+    // embarquer l'état SR pour TOUTES les questions (visibles + masquées),
+    // mais seulement si l'utilisateur a modifié l'état par rapport au backend
+    if (window.__srToggles && window.__srBaseline) {
+      for (const [id, onOff] of Object.entries(window.__srToggles)) {
+        if (window.__srBaseline[id] !== onOff) {
+          entries["__srToggle__" + id] = onOff; // "on" | "off"
+        }
+      }
+    }
+
+    const selected = dateSelect.selectedOptions[0];
+    const mode = selected?.dataset.mode || "daily";
+
+    if (mode === "daily") {
+      entries._mode = "daily";
+      entries._date = selected.dataset.date; // YYYY-MM-DD
+    } else {
+      entries._mode = "practice";
+      entries._category = selected.dataset.category; // nom exact
+    }
+    entries.apiUrl = apiUrl;
+
+    console.log("📦 Envoi des données au Worker...", entries);
+
+    const btn = document.getElementById("submitBtn");
+    btn.disabled = true;
+    btn.classList.add("opacity-60", "cursor-not-allowed");
+    const btnPrev = btn.innerHTML;
+    btn.innerHTML = `
+      <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      Envoi...
+    `;
+
+    fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
+      method: "POST",
+      body: JSON.stringify(entries),
+      headers: { "Content-Type": "application/json" }
+    })
+      .then(async (res) => {
+        const text = await res.text().catch(() => "");
+        if (!res.ok) throw new Error(text || "HTTP " + res.status);
+        // succès
+        showToast("✅ Réponses envoyées !");
+        console.log("✅ Réponses envoyées avec succès.", { payload: entries });
+
+        // recharge automatiquement la vue pour refléter les délais posés
+        const selected = dateSelect.selectedOptions[0];
+        const mode = selected?.dataset.mode || "daily";
+
+        // on peut vider les délais mémorisés pour repartir propre
+        if (window.__delayValues) window.__delayValues = {};
+        // on repart propre aussi pour SR
+        window.__srToggles  = {};
+        window.__srBaseline = {};
+
+        setTimeout(() => {
+          if (mode === "practice") {
+            // recharge la même catégorie → le backend calculera l’itération suivante
+            loadPracticeForm(selected.dataset.category);
+            showToast("➡️ Itération suivante chargée", "blue");
+          } else {
+            // recharge la même date → masquera les questions avec un délai > 0
+            loadFormForDate(selected.dataset.date);
+          }
+        }, 250);
+      })
+      .catch(err => {
+        console.error("❌ Erreur lors de l’envoi des données :", err);
+        showToast("❌ Erreur d’envoi", "red");
+      })
+      .finally(() => {
+        btn.disabled = false;
+        btn.classList.remove("opacity-60", "cursor-not-allowed");
+        btn.innerHTML = btnPrev;
+      });
+  });
+
+  // =========================
+  //   Chargements / Renders
+  // =========================
+
+  function clearFormUI() {
+    document.getElementById("daily-form").innerHTML = "";
+    document.getElementById("submit-section").classList.add("hidden");
+  }
+
+  function showFormUI() {
+    document.getElementById("daily-form").classList.remove("hidden");
+    document.getElementById("submit-section").classList.remove("hidden");
+    const loader = document.getElementById("loader");
+    if (loader) loader.classList.add("hidden");
+  }
+
+  function loadFormForDate(dateISO) {
+    clearFormUI();
+    const loader = document.getElementById("loader");
+    if (loader) loader.classList.remove("hidden");
+    console.log(`📡 Chargement des questions pour la date : ${dateISO}`);
+
+    fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}`)
+      .then(res => res.json())
+      .then(questions => {
+        console.log(`✅ ${questions.length} question(s) chargée(s).`);
+        renderQuestions(questions);
+      })
+      .catch(err => {
+        document.getElementById("loader")?.classList.add("hidden");
+        console.error(err);
+        showToast("❌ Erreur de chargement du formulaire", "red");
+      });
+  }
+
+  async function loadPracticeForm(category) {
+    clearFormUI();
+    const loader = document.getElementById("loader");
+    if (loader) loader.classList.remove("hidden");
+    console.log(`📡 Chargement des questions pour la catégorie : ${category}`);
+
+    try {
+      const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`);
+      const questions = await res.json();
+      console.log(`✅ ${questions.length} question(s) de pratique chargée(s).`);
+      renderQuestions(questions);
+    } catch (e) {
+      document.getElementById("loader")?.classList.add("hidden");
+      console.error(e);
+      showToast("❌ Erreur de chargement du formulaire", "red");
+    }
+  }
+
+  // ⬇️ Version avec labels à chaque point et largeur dynamique
+  function renderLikertChart(parentEl, history, normalize) {
+    const hist = Array.isArray(history) ? history.slice() : [];
+    if (!hist.length) return;
+
+    // ---- Ordonnancement: ANCIEN -> RÉCENT (récent à DROITE)
+    const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+    const iterRe = /\b(\d+)\s*\(/; // "Catégorie 12 (...)"
+    const toKey = (e, idx) => {
+      if (Number.isFinite(e.colIndex)) return { k: e.colIndex, kind: "col" }; // plus petit = plus récent dans ta feuille
+      if (e.date && dateRe.test(e.date)) {
+        const [, d, m, y] = e.date.match(dateRe);
+        return { k: new Date(`${y}-${m}-${d}`).getTime(), kind: "time" };
+      }
+      if (e.key && dateRe.test(e.key)) {
+        const [, d, m, y] = e.key.match(dateRe);
+        return { k: new Date(`${y}-${m}-${d}`).getTime(), kind: "time" };
+      }
+      if (e.key && iterRe.test(e.key)) return { k: parseInt(e.key.match(iterRe)[1], 10), kind: "iter" };
+      return { k: idx, kind: "idx" };
+    };
+    const ordered = hist
+      .map((e,i)=>({e, key:toKey(e,i)}))
+      .sort((a,b) => {
+        if (a.key.kind === "col" && b.key.kind === "col") return b.key.k - a.key.k; // DESC -> ancien à gauche
+        return a.key.k - b.key.k; // ASC  -> ancien à gauche
+      })
+      .map(x=>x.e);
+
+    // --- Mapping Likert
+    const levels = ["non","plutot non","moyen","plutot oui","oui"];
+    const pretty  = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
+    const pickDate = (e) => {
+      const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
+      if (e.date && dateRe.test(e.date)) return e.date;
+      if (e.key  && dateRe.test(e.key))  return e.key.match(dateRe)[0];
+      return "";
+    };
+    const points = ordered.map(e => {
+      const v = normalize(e.value);
+      const idx = levels.indexOf(v);
+      if (idx === -1) return null;
+      const fullDate = pickDate(e);
+      const shortDate = fullDate ? fullDate.slice(0,5) : "";
+      const fallback = e.date || e.key || "";
+      return { idx, v, label: shortDate || fallback.slice(0,5), fullLabel: fullDate || fallback, raw: e };
+    }).filter(Boolean);
+    if (points.length < 2) return;
+
+    // ---- Mesurer la largeur des labels pour espacement sans chevauchement
+    const measCanvas = document.createElement("canvas");
+    const mctx = measCanvas.getContext("2d");
+    mctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+    let maxLabelW = 0;
+    for (const p of points) maxLabelW = Math.max(maxLabelW, Math.ceil(mctx.measureText(p.label).width));
+    const stepPx = Math.max(28, maxLabelW + 12);
+
+    // ---- Layout
+    const pad = { l: 16, r: 86, t: 14, b: 30 }; // légende à droite
+    const parentW = Math.max(300, Math.floor(parentEl.getBoundingClientRect().width || 300));
+    const neededPlotW = (points.length - 1) * stepPx + pad.l + pad.r;
+    const plotW = Math.max(parentW, neededPlotW);
+    const plotH = 176;
+
+    // conteneur scrollable (mobile-friendly)
+    const scroller = document.createElement("div");
+    scroller.style.cssText = "width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-x;";
+    scroller.dataset.autoscroll = "right";
+    parentEl._likertScroller = scroller;
+    parentEl.appendChild(scroller);
+
+    const canvas = document.createElement("canvas");
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = Math.round(plotW * dpr);
+    canvas.height = Math.round(plotH * dpr);
+    canvas.style.width  = plotW + "px";
+    canvas.style.height = plotH + "px";
+    canvas.style.display = "block";
+    canvas.style.borderRadius = "10px";
+    scroller.appendChild(canvas);
+    // scroll au plus récent (droite) avec double rAF
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scroller.scrollLeft = scroller.scrollWidth;
+      });
+    });
+
+    // petit tooltip
+    const tip = document.createElement("div");
+    tip.style.cssText = "position:absolute;padding:6px 8px;background:#111827;color:#fff;border-radius:6px;font-size:12px;pointer-events:none;opacity:0;transform:translate(-50%,-120%);white-space:nowrap;transition:opacity .12s;";
+    scroller.style.position = "relative";
+    scroller.appendChild(tip);
+
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    const w = plotW - pad.l - pad.r;
+    const h = plotH - pad.t - pad.b;
+
+    // --- fond arrondi
+    const r = 10;
+    ctx.save();
+    const rr = (x,y,w,h,r) => { ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); };
+    rr(4,4,plotW-8,plotH-8,r);
+    ctx.clip();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0,0,plotW,plotH);
+    ctx.restore();
+
+    // --- grille douce
+    ctx.strokeStyle = "#eaecef";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < levels.length; i++) {
+      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i);
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + w, y); ctx.stroke();
+    }
+
+    // --- repères X et labels à chaque point
+    const n = points.length;
+    const step = n > 1 ? w / (n - 1) : w;
+    ctx.fillStyle = "#6b7280";
+    ctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+    ctx.textAlign = "center";
+
+    // --- légende à DROITE (Oui en haut, Non en bas)
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#374151";
+    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+    for (let i = 0; i < levels.length; i++) {
+      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - i);
+      ctx.fillText(pretty[levels[i]] || levels[i], pad.l + w + 10, y + 4);
+    }
+
+    // --- ligne avec dégradé
+    const grad = ctx.createLinearGradient(pad.l, 0, pad.l + w, 0);
+    grad.addColorStop(0,  "#60a5fa"); // bleu clair
+    grad.addColorStop(1,  "#7c3aed"); // violet
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const x = pad.l + i * step;
+      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // --- points
+    ctx.fillStyle = "#111827";
+    const dotRadius = 2.8;
+    const dotXY = [];
+    points.forEach((p, i) => {
+      const x = pad.l + i * step;
+      const y = pad.t + (h / (levels.length - 1)) * (levels.length - 1 - p.idx);
+      ctx.beginPath(); ctx.arc(x, y, dotRadius, 0, Math.PI*2); ctx.fill();
+      dotXY.push({x,y, p});
+      // label sous chaque point
+      ctx.fillStyle = "#6b7280";
+      ctx.fillText(p.label, x, pad.t + h + 18);
+      ctx.fillStyle = "#111827";
+    });
+
+    // --- axe X
+    ctx.strokeStyle = "#d1d5db";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.l, pad.t + h); ctx.lineTo(pad.l + w, pad.t + h); ctx.stroke();
+
+    // --- scroll au plus récent (droite) si overflow (conservé)
+    requestAnimationFrame(() => { scroller.scrollLeft = scroller.scrollWidth; });
+
+    // --- tooltip simple
+    canvas.addEventListener("mousemove", (ev) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = (ev.clientX - rect.left);
+      const y = (ev.clientY - rect.top);
+      // cherche le point le plus proche
+      let best = null, bestD = 99999;
+      for (const d of dotXY) {
+        const dx = x - d.x, dy = y - d.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < bestD) { bestD = dist; best = d; }
+      }
+      if (best && bestD < 18) {
+        tip.style.left = Math.round(best.x) + "px";
+        tip.style.top  = Math.round(best.y) + "px";
+        tip.innerHTML = `${best.p.fullLabel || ""} · <b>${pretty[best.p.v] || best.p.v}</b>`;
+        tip.style.opacity = "1";
+      } else {
+        tip.style.opacity = "0";
+      }
+    });
+    canvas.addEventListener("mouseleave", () => { tip.style.opacity = "0"; });
+  }
+
+  function refreshCurrentView() {
+    const sel = document.getElementById("date-select");
+    if (!sel || !sel.selectedOptions.length) return;
+    const opt = sel.selectedOptions[0];
+    if ((opt.dataset.mode || "daily") === "practice") {
+      loadPracticeForm(opt.dataset.category);
+    } else {
+      loadFormForDate(opt.dataset.date);
+    }
+  }
+
+  // ====== GESTION CONSIGNES (UI) ======
+  async function loadConsignes() {
+    const res = await fetch(`${apiUrl}?mode=consignes`);
+    const list = await res.json();
+    renderConsignesManager(Array.isArray(list) ? list : []);
+  }
+
+  function renderConsignesManager(consignes) {
+    const wrap = document.getElementById("consignes-list");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    consignes.forEach(c => {
+      const archived = (c.frequency || "").toLowerCase().includes("archiv");
+      const row = document.createElement("div");
+      row.className = "px-4 py-3 flex items-center gap-3";
+
+      const left = document.createElement("div");
+      left.className = "flex-1 min-w-0";
+      left.innerHTML = `
+      <div class="font-medium ${archived ? 'line-through text-gray-400' : ''}">${c.label}</div>
+      <div class="text-xs text-gray-500">
+        Cat: <b>${c.category || '-'}</b> · Type: <b>${c.type || '-'}</b> · Fréq: <b>${c.frequency || '-'}</b> · Pri: <b>${c.priority ?? '-'}</b>
+      </div>
+    `;
+      row.appendChild(left);
+
+      const btns = document.createElement("div");
+      btns.className = "flex items-center gap-2";
+      const edit = document.createElement("button");
+      edit.className = "px-2 py-1 text-sm border rounded hover:bg-gray-50";
+      edit.textContent = "Modifier";
+      edit.onclick = () => openConsigneModal(c);
+      btns.appendChild(edit);
+
+      const arch = document.createElement("button");
+      arch.className = "px-2 py-1 text-sm border rounded hover:bg-gray-50";
+      arch.textContent = archived ? "Désarchiver" : "Archiver";
+      arch.onclick = async () => {
+        await updateConsigne({
+          id: c.id,
+          frequency: archived ? "Pratique délibérée" : "archivé"
+        });
+        showToast(archived ? "✅ Désarchivée" : "✅ Archivée");
+        await loadConsignes();
+        refreshCurrentView();
+      };
+      btns.appendChild(arch);
+
+      const del = document.createElement("button");
+      del.className = "px-2 py-1 text-sm border rounded hover:bg-red-50 text-red-700 border-red-200";
+      del.textContent = "Supprimer";
+      del.onclick = async () => {
+        if (!confirm("Supprimer définitivement cette consigne ?")) return;
+        await deleteConsigne(c.id);
+        showToast("🗑️ Supprimée");
+        await loadConsignes();
+        refreshCurrentView();
+      };
+      btns.appendChild(del);
+
+      row.appendChild(btns);
+      wrap.appendChild(row);
+    });
+  }
+
+  function openConsigneModal(c = null) {
+    const modal = document.getElementById("consigne-modal");
+    if (!modal) return;
+    const form  = document.getElementById("consigne-form");
+    document.getElementById("consigne-modal-title").textContent = c ? "Modifier la consigne" : "Nouvelle consigne";
+
+    // reset
+    form.reset();
+    form.elements.id.value = c?.id || "";
+    form.elements.label.value = c?.label || "";
+    form.elements.category.value = c?.category || "";
+    form.elements.type.value = c?.type || "Oui/Non";
+    form.elements.priority.value = String(c?.priority || 2);
+    form.elements.frequency.value = c?.frequency || "Pratique délibérée";
+
+    modal.classList.remove("hidden");
+  }
+
+  function closeConsigneModal() {
+    const modal = document.getElementById("consigne-modal");
+    if (modal) modal.classList.add("hidden");
+  }
+
+  async function createConsigne(payload) {
+    const body = {
+      _action: "consigne_create",
+      category: payload.category,
+      type: payload.type,
+      frequency: payload.frequency || "Pratique délibérée",
+      label: payload.label,
+      priority: payload.priority,
+      apiUrl
+    };
+    await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  }
+
+  async function updateConsigne(payload) {
+    const body = {
+      _action: "consigne_update",
+      id: payload.id,
+      category: payload.category,
+      type: payload.type,
+      frequency: payload.frequency,
+      newLabel: payload.label,
+      priority: payload.priority,
+      apiUrl
+    };
+    await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  }
+
+  async function deleteConsigne(id) {
+    const body = { _action: "consigne_delete", id, apiUrl };
+    await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  }
+
+  function addDelayUI(wrapper, q) {
+    const mode = document.getElementById("date-select").selectedOptions[0]?.dataset.mode || "daily";
+    const key = (mode === "daily" ? `__delayDays__` : `__delayIter__`) + q.id;
+
+    const row = document.createElement("div");
+    row.className = "mt-2 flex items-center gap-3 relative"; // relative pour ancrer le popover
+    wrapper.appendChild(row);
+
+    // Bouton
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "text-sm text-blue-600 hover:underline";
+    btn.textContent = "⏱️ Délai";
+    row.appendChild(btn);
+
+    // Info (prochaine échéance / délai choisi)
+    const info = document.createElement("span");
+    info.className = "text-xs text-gray-500";
+    const infos = [];
+    if (q.scheduleInfo?.nextDate) infos.push(`Prochaine : ${q.scheduleInfo.nextDate}`);
+    if (q.scheduleInfo?.remaining > 0) {
+      infos.push(`Revient dans ${q.scheduleInfo.remaining} itération(s)`);
+    }
+
+    // réaffiche la valeur déjà choisie si existante
+    if (window.__delayValues[key] != null) {
+      const n = parseInt(window.__delayValues[key], 10);
+      if (!Number.isNaN(n)) {
+        if (n === -1) {
+          infos.push("Délai : annulé");
+        } else {
+          infos.push(mode === "daily" ? `Délai choisi : ${n} j` : `Délai choisi : ${n} itérations`);
+        }
+      }
+    }
+    info.textContent = infos.join(" — ") || "";
+    row.appendChild(info);
+
+    // Popover (caché par défaut)
+    const pop = document.createElement("div");
+    pop.className = "absolute right-0 top-8 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 hidden";
+    pop.setAttribute("role", "menu");
+    // marquer le popover pour pouvoir fermer les autres
+    pop.setAttribute("data-pop", "delay");
+    row.appendChild(pop);
+
+    // Options rapides
+    const options = mode === "daily"
+      ? [
+          { label: "Aujourd’hui (0 j)", value: 0 },
+          { label: "+1 j", value: 1 },
+          { label: "+2 j", value: 2 },
+          { label: "+3 j", value: 3 },
+          { label: "1 semaine", value: 7 },
+          { label: "2 semaines", value: 14 },
+          { label: "1 mois (~30 j)", value: 30 }
+        ]
+      : [
+          { label: "1", value: 1 },
+          { label: "2", value: 2 },
+          { label: "3", value: 3 },
+          { label: "5", value: 5 },
+          { label: "8", value: 8 },
+          { label: "13", value: 13 },
+          { label: "21", value: 21 }
+        ];
+
+    const grid = document.createElement("div");
+    grid.className = "p-2 grid grid-cols-2 gap-2";
+    pop.appendChild(grid);
+
+    const setValue = (n) => {
+      window.__delayValues[key] = String(n);
+      if (n === -1) {
+        info.textContent = "Délai : annulé";
+      } else {
+        info.textContent = mode === "daily"
+          ? `Délai choisi : ${n} j`
+          : `Délai choisi : ${n} itérations`;
+      }
+      pop.classList.add("hidden");
+    };
+
+    options.forEach(opt => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "px-2 py-1 text-sm border border-gray-200 rounded hover:bg-gray-50";
+      b.textContent = opt.label;
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        setValue(opt.value);
+      });
+      grid.appendChild(b);
+    });
+
+    // Ligne d’actions
+    const actions = document.createElement("div");
+    actions.className = "border-t border-gray-100 p-2 flex items-center justify-between";
+    pop.appendChild(actions);
+
+    // Effacer (n=-1 => le backend effacera la note)
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "text-xs text-red-600 hover:underline";
+    clearBtn.textContent = "Retirer le délai";
+    clearBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      setValue(-1);
+    });
+    actions.appendChild(clearBtn);
+
+    // Fermer
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "text-xs text-gray-600 hover:underline";
+    closeBtn.textContent = "Fermer";
+    closeBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      pop.classList.add("hidden");
+    });
+    actions.appendChild(closeBtn);
+
+    // --- ÉTAT SR côté front (mémoire volatile) ---
+    window.__srToggles = window.__srToggles || {}; // clé: q.id -> "on"|"off"
+    // Affichage de l'état SR actuel (v. API doGet ci-dessous)
+    const srCurrent = q.scheduleInfo?.sr || { on:false };
+    if (!(q.id in window.__srBaseline)) {
+      window.__srBaseline[q.id] = srCurrent.on ? "on" : "off";
+    }
+    if (!(q.id in window.__srToggles)) {
+      window.__srToggles[q.id] = srCurrent.on ? "on" : "off";
+    }
+    // Ligne SR
+    const srRow = document.createElement("div");
+    srRow.className = "border-t border-gray-100 p-2 flex items-center justify-between";
+    pop.appendChild(srRow);
+    const srLabel = document.createElement("span");
+    srLabel.className = "text-xs text-gray-700";
+    srLabel.innerHTML = `Répétition espacée : <strong>${window.__srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>` +
+      (srCurrent.on && srCurrent.interval ? ` <span class="text-gray-500">(${srCurrent.unit==="iters" ? srCurrent.interval+" itér." : srCurrent.due ? "due "+srCurrent.due : srCurrent.interval+" j"})</span>` : "");
+    srRow.appendChild(srLabel);
+    const srBtn = document.createElement("button");
+    srBtn.type = "button";
+    srBtn.className = "text-xs text-blue-600 hover:underline";
+    srBtn.textContent = window.__srToggles[q.id] === "on" ? "Désactiver SR" : "Activer SR";
+    srBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      window.__srToggles[q.id] = window.__srToggles[q.id] === "on" ? "off" : "on";
+      srBtn.textContent = window.__srToggles[q.id] === "on" ? "Désactiver SR" : "Activer SR";
+      srLabel.innerHTML = `Répétition espacée : <strong>${window.__srToggles[q.id] === "on" ? "ON" : "OFF"}</strong>`;
+    });
+    srRow.appendChild(srBtn);
+
+    // Toggle popover + gestion du click outside (attaché à l'ouverture)
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+
+      // Ferme les autres popovers
+      document.querySelectorAll('[data-pop="delay"]').forEach(el => {
+        if (el !== pop) {
+          el.classList.add("hidden");
+          if (el._onOutside) {
+            document.removeEventListener("click", el._onOutside);
+            el._onOutside = null;
+          }
+        }
+      });
+
+      const wasHidden = pop.classList.contains("hidden");
+      pop.classList.toggle("hidden");
+
+      // si on vient d'ouvrir → poser l'écouteur; si on vient de fermer → l'enlever
+      if (wasHidden) {
+        pop._onOutside = (e) => {
+          if (!pop.contains(e.target) && e.target !== btn) {
+            pop.classList.add("hidden");
+            document.removeEventListener("click", pop._onOutside);
+            pop._onOutside = null;
+          }
+        };
+        setTimeout(() => document.addEventListener("click", pop._onOutside), 0);
+      } else if (pop._onOutside) {
+        document.removeEventListener("click", pop._onOutside);
+        pop._onOutside = null;
+      }
+    });
+  }
+
+  // Renderer commun (journalier & pratique)
+  function renderQuestions(questions) {
+    const container = document.getElementById("daily-form");
+    container.innerHTML = "";
+    console.log(`✍️ Rendu de ${questions.length} question(s)`);
+
+    const hiddenSR = []; // questions masquées par SR/delay
+    const normalize = (str) =>
+      (str || "")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[\u00A0\u202F\u200B]/g, " ")
+      .replace(/\s+/g, " ")
+      .toLowerCase()
+      .trim();
+
+    const colorMap = {
+      "oui": "bg-green-100 text-green-800",
+      "plutot oui": "bg-green-50 text-green-700",
+      "moyen": "bg-yellow-100 text-yellow-800",
+      "plutot non": "bg-red-100 text-red-900",
+      "non": "bg-red-200 text-red-900",
+      "pas de reponse": "bg-gray-200 text-gray-700 italic"
+    };
+
+    (questions || []).forEach(q => {
+      // Log détaillé pour chaque question
+      console.groupCollapsed(`[Question] Traitement de "${q.label}"`);
+      console.log("-> Type de question :", q.type);
+      console.log("-> Est-elle affichée ? :", !q.skipped);
+      if (q.skipped) {
+        console.log("-> Raison du masquage :", q.reason);
+      }
+      console.groupEnd();
+      
+      if (q.skipped) {
+        // on garde tout (history, scheduleInfo…) pour pouvoir afficher délai + historique
+        hiddenSR.push(q);
+        return;
+      }
+      
+      const wrapper = document.createElement("div");
+      wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
 
       const label = document.createElement("label");
       label.className = "block text-lg font-semibold mb-2";
       label.textContent = q.label;
-      wrap.appendChild(label);
+      wrapper.appendChild(label);
 
-      // Barre méta (priorité + actions consigne)
-      const meta = document.createElement("div");
-      meta.className = "mb-2 flex flex-wrap items-center gap-2";
-      const p = q.priority || 2;
-      const priLabel = document.createElement("span");
-      priLabel.className = "text-xs text-gray-600";
-      priLabel.textContent = "Priorité :";
-      meta.appendChild(priLabel);
-      const badge = document.createElement("span");
-      badge.className = `ml-2 text-xs px-2 py-0.5 rounded ${PRIO[p].badge}`;
-      badge.textContent = PRIO[p].text;
-      meta.appendChild(badge);
-      const pSel = prioritySelect(p);
-      pSel.addEventListener("change", async () => {
-        const newP = parseInt(pSel.value, 10) || 2;
-        if (__prioBusy.has(q.id)) return;     // évite double tir
-        __prioBusy.add(q.id);
-        pSel.disabled = true;
-
-        try {
-          const res = await postJSON({ _action: "consigne_update", id: q.id, priority: newP }, { retries: 1 });
-          const txt = await res.text().catch(() => "");
-          if (!res.ok || (txt && txt.startsWith("❌"))) throw new Error(txt || `HTTP ${res.status}`);
-          // maj visuelle immédiate
-          badge.textContent = PRIO[newP].text;
-          badge.className = `ml-2 text-xs px-2 py-0.5 rounded ${PRIO[newP].badge}`;
-          showToast("✅ Priorité mise à jour");
-          // si tu veux éviter de tout recharger, commente la ligne suivante :
-          // handleSelectChange();
-          moveCardToGroup(wrap, newP);
-        } catch (e) {
-          console.error(e);
-          showToast("❌ Erreur mise à jour priorité", "red");
-        } finally {
-          __prioBusy.delete(q.id);
-          pSel.disabled = false;
-        }
-      });
-      meta.appendChild(pSel);
-      const editBtn = document.createElement("button");
-      editBtn.type="button";
-      editBtn.className="text-sm text-blue-600 hover:underline";
-      editBtn.textContent="Éditer";
-      editBtn.addEventListener("click", () => openConsigneEditorInline(wrap, q));
-      const delBtn = document.createElement("button");
-      delBtn.type="button";
-      delBtn.className="text-sm text-red-600 hover:underline";
-      delBtn.textContent="Supprimer";
-      delBtn.addEventListener("click", async () => {
-        if (!confirm("Supprimer cette consigne ?")) return;
-        delBtn.disabled = true;
-        try {
-          const r = await postJSON({ _action:"consigne_delete", id: q.id });
-          const t = await r.text().catch(()=> "");
-          if (!r.ok || (t && t.startsWith("❌"))) throw new Error(t || `HTTP ${r.status}`);
-          showToast("🗑️ Consigne supprimée");
-          handleSelectChange();
-        } catch(e){
-          showToast("❌ Erreur suppression", "red");
-        } finally {
-          delBtn.disabled = false;
-        }
-      });
-      const actions = document.createElement("div");
-      actions.className = "ml-auto flex items-center gap-3";
-      actions.appendChild(editBtn);
-      actions.appendChild(delBtn);
-      meta.appendChild(actions);
-      wrap.appendChild(meta);
-
-      // Réutilise la logique de rendu existante pour les champs + SR toggle + historique
+      // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
       let referenceAnswer = "";
       if (q.history && Array.isArray(q.history)) {
-        const dateISO = document.getElementById("date-select")?.value; // "YYYY-MM-DD"
+        const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
         if (dateISO) {
-          const [yyyy, mm, dd] = dateISO.split("-");
-          const wanted = `${dd}/${mm}/${yyyy}`; // "dd/MM/yyyy"
-          const entry = q.history.find(e => e?.date === wanted);
+          const entry = q.history.find(entry => {
+            if (entry?.date) {
+              const [dd, mm, yyyy] = entry.date.split("/");
+              const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+              return entryDateISO === dateISO;
+            }
+            return false;
+          });
           referenceAnswer = entry?.value || "";
         }
       }
       let input;
       const type = (q.type || "").toLowerCase();
+
       if (type.includes("oui")) {
-        input = yesNoGroup(q.id, referenceAnswer);
-        const radios = input.querySelectorAll('input[type="radio"]');
-        radios.forEach((r, idx) => {
-          const id = `${q.id}-yn-${idx}`;
-          r.id = id;
-          const lab = r.parentElement;
-          if (lab && lab.tagName.toLowerCase() === 'label') {
-            // label imbriqué suffit; pas besoin de for, on laisse tel quel
-          }
-        });
+        input = document.createElement("div");
+        input.className = "space-x-6 text-gray-700";
+        input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
+          <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
       } else if (type.includes("menu") || type.includes("likert")) {
         input = document.createElement("select");
         input.name = q.id;
@@ -648,6 +959,7 @@ function renderQuestions(questions) {
         input = document.createElement("textarea");
         input.name = q.id;
         input.rows = 4;
+        // sm = mobile ; md = ≥768px
         input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
         input.value = referenceAnswer;
       } else {
@@ -657,30 +969,32 @@ function renderQuestions(questions) {
         input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
         input.value = referenceAnswer;
       }
-      wrap.appendChild(input);
-      addSROnlyUI(wrap, q);
 
-      // Historique
+      wrapper.appendChild(input);
+      addDelayUI(wrapper, q); // Appel du nouveau helper ici
+    
+      // 📓 Historique (compatible daily et practice)
       if (q.history && q.history.length > 0) {
-        const normalize = (str) =>
-          (str || "")
-          .normalize("NFD")
-          .replace(/[̀-ͯ]/g, "")
-          .replace(/[\u00A0\u202F\u200B]/g, " ")
-          .replace(/\s+/g, " ")
-          .toLowerCase()
-          .trim();
+        console.log(`📖 Affichage de l'historique pour "${q.label}" (${q.history.length} entrées)`);
         const toggleBtn = document.createElement("button");
         toggleBtn.type = "button";
         toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
         toggleBtn.textContent = "📓 Voir l’historique des réponses";
+
         const historyBlock = document.createElement("div");
         historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
+
+        // Graphe Likert + 2 stats compactes (sur 30 dernières)
         renderLikertChart(historyBlock, q.history, normalize);
+
+        // --- Tri commun pour stats & liste : RÉCENT -> ANCIEN ---
         const orderedForStats = orderForHistory(q.history);
+
+        // --- Stats compactes sur fenêtre récente ---
         const LIMIT = 10;
         const WINDOW = 30;
-        const badge = (title, value, tone = "blue") => {
+        const badge = (title, value, tone="blue") => {
+          const div = document.createElement("div");
           const tones = {
             blue:"bg-blue-50 text-blue-700 border-blue-200",
             green:"bg-green-50 text-green-700 border-green-200",
@@ -689,219 +1003,267 @@ function renderQuestions(questions) {
             gray:"bg-gray-50 text-gray-700 border-gray-200",
             purple:"bg-purple-50 text-purple-700 border-purple-200"
           };
-          const div = document.createElement("div");
-          div.className = `px-2.5 py-1 rounded-full border text-xs font-medium ${tones[tone] || tones.gray}`;
-          const span1 = document.createElement("span");
-          span1.className = "opacity-70";
-          span1.textContent = `${title}:`;
-          const span2 = document.createElement("span");
-          span2.className = "font-semibold";
-          span2.textContent = String(value ?? "");
-          div.append(span1, document.createTextNode(" "), span2);
+          div.className = `px-2.5 py-1 rounded-full border text-xs font-medium ${tones[tone]||tones.gray}`;
+          div.innerHTML = `<span class="opacity-70">${title}:</span> <span class="font-semibold">${value}</span>`;
           return div;
         };
         const POSITIVE = new Set(["oui","plutot oui"]);
+
+        // Fenêtre des N plus récents
         const windowHist = orderedForStats.slice(0, WINDOW);
+
+        // Série courante (positifs consécutifs depuis le plus récent)
         let currentStreak = 0;
-          for (const e of windowHist) { if (POSITIVE.has(normalize(e.value))) currentStreak++; else break; }
-          const counts = {}; const order = ["non","plutot non","moyen","plutot oui","oui"];
-          for (const e of windowHist) { const v = normalize(e.value); counts[v] = (counts[v] || 0) + 1; }
-          let best = null, bestCount = -1; for (const k of order) { const c = counts[k] || 0; if (c > bestCount) { best = k; bestCount = c; } }
+        for (const e of windowHist) {
+          if (POSITIVE.has(normalize(e.value))) currentStreak++;
+          else break;
+        }
+
+        // Réponse la plus fréquente (dans la fenêtre)
+        const counts = {};
+        const order = ["non","plutot non","moyen","plutot oui","oui"];
+        for (const e of windowHist) {
+          const v = normalize(e.value);
+          counts[v] = (counts[v] || 0) + 1;
+        }
+        let best = null, bestCount = -1;
+        for (const k of order) {
+          const c = counts[k] || 0;
+          if (c > bestCount) { best = k; bestCount = c; }
+        }
         const pretty = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
-          const statsWrap = document.createElement("div"); statsWrap.className = "mb-3 flex flex-wrap gap-2 items-center";
+        const statsWrap = document.createElement("div");
+        statsWrap.className = "mb-3 flex flex-wrap gap-2 items-center";
         statsWrap.appendChild(badge("Série actuelle (positifs)", currentStreak, currentStreak>0 ? "green":"gray"));
         if (best) statsWrap.appendChild(badge("Réponse la plus fréquente", pretty[best] || best, "purple"));
         historyBlock.appendChild(statsWrap);
-          const colorMap = { "oui": "bg-green-100 text-green-800", "plutot oui": "bg-green-50 text-green-700", "moyen": "bg-yellow-100 text-yellow-800", "plutot non": "bg-red-100 text-red-900", "non": "bg-red-200 text-red-900", "pas de reponse": "bg-gray-200 text-gray-700 italic" };
+
+        // --- Liste : utilise le même ordre trié (récent -> ancien) ---
         orderedForStats.forEach((entry, idx) => {
           const keyPretty = prettyKeyWithDate(entry);
           const val = entry.value;
           const normalized = normalize(val);
+          const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
+
           const entryDiv = document.createElement("div");
-            entryDiv.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
+          entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
           if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history");
-          entryDiv.textContent = "";
-          entryDiv.appendChild(strongText(keyPretty));
-          entryDiv.append(" – " + (val ?? ""));
+          entryDiv.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
           historyBlock.appendChild(entryDiv);
         });
+
         if (orderedForStats.length > LIMIT) {
-            const moreBtn = document.createElement("button"); moreBtn.type = "button"; moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-            let expanded = false; const rest = orderedForStats.length - LIMIT; const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`; setLabel();
-            moreBtn.addEventListener("click", () => { expanded = !expanded; historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded)); setLabel(); });
+          const moreBtn = document.createElement("button");
+          moreBtn.type = "button";
+          moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
+          let expanded = false; const rest = orderedForStats.length - LIMIT;
+          const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
+          setLabel();
+          moreBtn.addEventListener("click", () => {
+            expanded = !expanded;
+            historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
+            setLabel();
+          });
           historyBlock.appendChild(moreBtn);
         }
-        toggleBtn.addEventListener("click", () => { const wasHidden = historyBlock.classList.contains("hidden"); historyBlock.classList.toggle("hidden"); if (wasHidden) scrollToRight(historyBlock._likertScroller); });
-        wrap.appendChild(toggleBtn);
-        wrap.appendChild(historyBlock);
-      }
-      body.appendChild(wrap);
-    });
 
-    block.appendChild(body);
-    container.appendChild(block);
-  };
-
-  renderGroup(p1, { title:"Priorité haute",   style:{ badge:"bg-red-100 text-red-700",    card:"ring-1 ring-red-100" }, groupKey:"p1" });
-  renderGroup(p2, { title:"Priorité normale", style:{ badge:"bg-gray-100 text-gray-800",  card:"" }, groupKey:"p2" });
-  renderGroup(p3, { title:"Priorité basse",   style:{ badge:"bg-green-100 text-green-700",card:"bg-green-50 bg-opacity-40" }, collapsed:true, groupKey:"p3" });
-
-  // === Panneau "Questions masquées (SR)" ===
-  if (hiddenSR.length) {
-    const panel = document.createElement("div");
-    panel.className = "mt-6";
-    const details = document.createElement("details");
-    details.className = "bg-gray-50 border border-gray-200 rounded-lg";
-    details.open = false;
-    const summary = document.createElement("summary");
-    summary.className = "cursor-pointer select-none px-4 py-2 font-medium text-gray-800 flex items-center justify-between";
-    summary.textContent = "";
-    const left  = document.createElement("span");
-    left.textContent = `🔕 ${hiddenSR.length} question(s) masquée(s) — répétition espacée`;
-    const right = document.createElement("span");
-    right.className = "text-sm text-gray-500";
-    right.textContent = "voir";
-    summary.append(left, right);
-    details.appendChild(summary);
-    const list = document.createElement("div");
-    list.className = "px-4 pt-2 pb-3";
-    const normalize = (str) => (str || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[\u00A0\u202F\u200B]/g, " ").replace(/\s+/g, " ").toLowerCase().trim();
-    hiddenSR.forEach(item => {
-      const row = document.createElement("div"); row.className = "mb-2 rounded bg-white border border-gray-200";
-      const content = document.createElement("div"); content.className = "px-3 pb-3 hidden";
-      const head = document.createElement("div"); head.className = "px-3 py-2 flex items-center justify-between";
-      const title = document.createElement("div"); title.textContent = ""; title.appendChild(strongText(item.label)); head.appendChild(title);
-      head.classList.add("cursor-pointer");
-      head.addEventListener("click", () => { const wasHidden = content.classList.contains("hidden"); content.classList.toggle("hidden"); if (wasHidden) { const sc = content.querySelector('[data-autoscroll="right"]'); scrollToRight(sc); } });
-      const sub = document.createElement("div"); sub.className = "px-3 pb-2 text-sm text-gray-700 flex items-center gap-2";
-      const extras = []; if (item.scheduleInfo?.nextDate) extras.push(`Prochaine : ${item.scheduleInfo.nextDate}`); if (Number(item.scheduleInfo?.remaining) > 0) extras.push(`Restant : ${item.scheduleInfo.remaining} itér.`);
-      const tail = extras.length ? ` (${extras.join(" — ")})` : ""; const reason = item.reason || "Répétition espacée"; sub.textContent = `⏱️ ${reason.replace(/^✅\s*/, '')}${tail}`;
-      
-      const srWrap = document.createElement("div");
-      addSROnlyUI(srWrap, item);
-      content.appendChild(srWrap);
-      if (item.history && item.history.length > 0) {
-        const toggleBtn = document.createElement("button"); toggleBtn.type = "button"; toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline"; toggleBtn.textContent = "📓 Voir l’historique des réponses";
-        const historyBlock = document.createElement("div"); historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
-        renderLikertChart(historyBlock, item.history, normalize);
-        const ordered = orderForHistory(item.history);
-        const colorMap = { "oui": "bg-green-100 text-green-800", "plutot oui": "bg-green-50 text-green-700", "moyen": "bg-yellow-100 text-yellow-800", "plutot non": "bg-red-100 text-red-900", "non": "bg-red-200 text-red-900", "pas de reponse": "bg-gray-200 text-gray-700 italic" };
-        const LIMIT = 10;
-        ordered.forEach((entry, idx) => {
-          const keyPretty = prettyKeyWithDate(entry); const val = entry.value; const normalized = normalize(val);
-          const div = document.createElement("div"); div.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
-          if (idx >= LIMIT) div.classList.add("hidden", "extra-history");
-          div.textContent = ""; div.appendChild(strongText(keyPretty)); div.append(" – " + (val ?? "")); historyBlock.appendChild(div);
+        toggleBtn.addEventListener("click", () => {
+          const wasHidden = historyBlock.classList.contains("hidden");
+          historyBlock.classList.toggle("hidden");
+          if (wasHidden) scrollToRight(historyBlock._likertScroller);
         });
-        if (ordered.length > LIMIT) {
-          const moreBtn = document.createElement("button"); moreBtn.type = "button"; moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-          let expanded = false; const rest = ordered.length - LIMIT; const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`; setLabel();
-          moreBtn.addEventListener("click", () => { expanded = !expanded; historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded)); setLabel(); });
-          historyBlock.appendChild(moreBtn);
+
+        wrapper.appendChild(toggleBtn);
+        wrapper.appendChild(historyBlock);
+      }
+
+      container.appendChild(wrapper);
+    });
+
+    // === Panneau "Questions masquées (SR)" ===
+    if (hiddenSR.length) {
+      const panel = document.createElement("div");
+      panel.className = "mt-6";
+
+      const details = document.createElement("details");
+      details.className = "bg-gray-50 border border-gray-200 rounded-lg";
+      details.open = false; // toujours replié par défaut
+
+      const summary = document.createElement("summary");
+      summary.className = "cursor-pointer select-none px-4 py-2 font-medium text-gray-800 flex items-center justify-between";
+      summary.innerHTML = `
+        <span>🔕 ${hiddenSR.length} question(s) masquée(s) — répétition espacée</span>
+        <span class="text-sm text-gray-500">voir</span>
+      `;
+      details.appendChild(summary);
+
+      const list = document.createElement("div");
+      list.className = "px-4 pt-2 pb-3";
+
+      const normalize = (str) =>
+        (str || "")
+          .normalize("NFD").replace(/[̀-ͯ]/g, "")
+          .replace(/[\u00A0\u202F\u200B]/g, " ")
+          .replace(/\s+/g, " ")
+          .toLowerCase()
+          .trim();
+
+      hiddenSR.forEach(item => {
+        const row = document.createElement("div");
+        row.className = "mb-2 rounded bg-white border border-gray-200";
+
+        // en-tête de l'item
+        const head = document.createElement("div");
+        head.className = "px-3 py-2 flex items-center justify-between";
+        const title = document.createElement("div");
+        title.innerHTML = `<strong>${item.label}</strong>`;
+        head.appendChild(title);
+
+        // r: toggle sur tout le header
+        head.classList.add("cursor-pointer");
+        head.addEventListener("click", () => {
+          const wasHidden = content.classList.contains("hidden");
+          content.classList.toggle("hidden");
+          if (wasHidden) {
+            const sc = content.querySelector('[data-autoscroll="right"]');
+            scrollToRight(sc);
+          }
+        });
+
+        // infos "prochaine échéance"
+        const sub = document.createElement("div");
+        sub.className = "px-3 pb-2 text-sm text-gray-700 flex items-center gap-2";
+        const extras = [];
+        if (item.scheduleInfo?.nextDate) extras.push(`Prochaine : ${item.scheduleInfo.nextDate}`);
+        if (Number(item.scheduleInfo?.remaining) > 0) extras.push(`Restant : ${item.scheduleInfo.remaining} itér.`);
+        const tail = extras.length ? ` (${extras.join(" — ")})` : "";
+        const reason = item.reason || "Répétition espacée";
+        sub.innerHTML = `⏱️ ${reason.replace(/^✅\s*/, '')}${tail}`;
+
+        // contenu détaillé replié
+        const content = document.createElement("div");
+        content.className = "px-3 pb-3 hidden";
+
+        // 1) UI Délai (mêmes options que pour les visibles)
+        const delayWrap = document.createElement("div");
+        addDelayUI(delayWrap, item);
+        content.appendChild(delayWrap);
+
+        // 2) Historique (même principe : bouton + bloc avec graphe + liste)
+        if (item.history && item.history.length > 0) {
+          const toggleBtn = document.createElement("button");
+          toggleBtn.type = "button";
+          toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
+          toggleBtn.textContent = "📓 Voir l’historique des réponses";
+
+          const historyBlock = document.createElement("div");
+          historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
+
+          // graphe likert
+          renderLikertChart(historyBlock, item.history, normalize);
+
+          // liste (RÉCENTS -> ANCIENS)
+          const ordered = orderForHistory(item.history);
+
+          const colorMap = {
+            "oui": "bg-green-100 text-green-800",
+            "plutot oui": "bg-green-50 text-green-700",
+            "moyen": "bg-yellow-100 text-yellow-800",
+            "plutot non": "bg-red-100 text-red-900",
+            "non": "bg-red-200 text-red-900",
+            "pas de reponse": "bg-gray-200 text-gray-700 italic"
+          };
+
+          const LIMIT = 10;
+          ordered.forEach((entry, idx) => {
+            const keyPretty = prettyKeyWithDate(entry);
+            const val = entry.value;
+            const normalized = normalize(val);
+            const div = document.createElement("div");
+            div.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
+            if (idx >= LIMIT) div.classList.add("hidden", "extra-history");
+            div.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
+            historyBlock.appendChild(div);
+          });
+
+          if (ordered.length > LIMIT) {
+            const moreBtn = document.createElement("button");
+            moreBtn.type = "button";
+            moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
+            let expanded = false; const rest = ordered.length - LIMIT;
+            const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
+            setLabel();
+            moreBtn.addEventListener("click", () => {
+              expanded = !expanded;
+              historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
+              setLabel();
+            });
+            historyBlock.appendChild(moreBtn);
+          }
+
+          toggleBtn.addEventListener("click", () => {
+            const wasHidden = historyBlock.classList.contains("hidden");
+            historyBlock.classList.toggle("hidden");
+            if (wasHidden) scrollToRight(historyBlock._likertScroller);
+          });
+
+          content.appendChild(toggleBtn);
+          content.appendChild(historyBlock);
         }
-        toggleBtn.addEventListener("click", () => { const wasHidden = historyBlock.classList.contains("hidden"); historyBlock.classList.toggle("hidden"); if (wasHidden) scrollToRight(historyBlock._likertScroller); });
-        content.appendChild(toggleBtn); content.appendChild(historyBlock);
-      }
-      row.appendChild(head); row.appendChild(sub); row.appendChild(content); list.appendChild(row);
-    });
-    const note = document.createElement("p"); note.className = "mt-2 text-xs text-gray-500"; note.textContent = "Ces items sont masqués automatiquement suite à vos réponses positives. Ils réapparaîtront à l’échéance."; list.appendChild(note);
-    details.appendChild(list); panel.appendChild(details); container.appendChild(panel);
-  }
-  showFormUI(); console.log("✅ Rendu des questions terminé.");
-}
 
-// --- Fallbacks légers / helpers manquants ---
-function showFormUI() {
-  document.getElementById("daily-form")?.classList.remove("hidden");
-  document.getElementById("submit-section")?.classList.remove("hidden");
-  document.getElementById("loader")?.classList.add("hidden");
-}
-// No-ops pour helpers graphiques si absents
-window.renderLikertChart  ??= function(el){ /* no-op */ };
-window.orderForHistory    ??= function(arr){ return (arr||[]).slice().reverse(); };
-window.prettyKeyWithDate  ??= function(e){ return e?.date || e?.key || ""; };
-window.scrollToRight      ??= function(scroller){
-  try { scroller?.scrollTo?.({ left: scroller.scrollWidth, behavior: "smooth" }); } catch(_) {}
-};
-let __loadAbort;
-async function loadFormForDate(dateISO) {
-  try {
-    __loadAbort?.abort?.();
-    __loadAbort = new AbortController();
-    const res = await fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}&ts=${Date.now()}`, { signal: __loadAbort.signal, cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const questions = await res.json();
-    window.__lastQuestions = questions;
-    renderQuestions(questions);
-  } catch (e) {
-    if (e.name === "AbortError") return;
-    console.error(e);
-    showToast("❌ Erreur chargement du formulaire", "red");
-  }
-}
-function handleSelectChange() {
-  const sel = document.getElementById("date-select");
-  const v = sel?.value || "";
-  if (!v) return;
-  if (v.startsWith("practice:")) {
-    loadPractice(v.slice("practice:".length));
-  } else {
-    loadFormForDate(v);
-  }
-}
-window.handleSelectChange = handleSelectChange;
-window.rebuildSelector = (typeof buildCombinedSelect === "function") ? buildCombinedSelect : () => {};
+        // toggle du volet de l'item: supprimé (on clique sur l'entête)
 
-async function initApp() {
-  // déjà masqués plus haut, donc plus rien à retirer ici
-  window.rebuildSelector = buildCombinedSelect;
-  const dateSelect = document.getElementById("date-select");
-  if (dateSelect) {
-    dateSelect.addEventListener("change", handleSelectChange);
-    await buildCombinedSelect();   // ⬅️ rempli semaine + pratique
-    handleSelectChange();
-  } else {
-    const todayISO = new Date().toISOString().slice(0, 10);
-    loadFormForDate(todayISO);
-  }
-}
+        row.appendChild(head);
+        row.appendChild(sub);
+        row.appendChild(content);
+        list.appendChild(row);
+      });
 
-// --- Envoi des réponses et toggles SR ---
-document.getElementById("submitBtn")?.addEventListener("click", async (e) => {
-  e.preventDefault();
-  const btn = e.currentTarget;
-  btn.disabled = true;
-  try {
-    const selVal = document.getElementById("date-select")?.value || "";
-    const form = document.getElementById("daily-form");
-    const payload = selVal.startsWith("practice:")
-      ? { _mode:"practice", _category: selVal.slice("practice:".length) }
-      : { _date: selVal || new Date().toISOString().slice(0,10) };
+      const note = document.createElement("p");
+      note.className = "mt-2 text-xs text-gray-500";
+      note.textContent = "Ces items sont masqués automatiquement suite à vos réponses positives. Ils réapparaîtront à l’échéance.";
+      list.appendChild(note);
 
-    form.querySelectorAll("[name]").forEach(el => {
-      if (el.type === "radio") {
-        if (el.checked) payload[el.name] = el.value;
-      } else {
-        payload[el.name] = el.value ?? "";
-      }
-    });
-
-    const base = window.__srBaseline || {};
-    const cur  = window.__srToggles  || {};
-    for (const [id, state] of Object.entries(cur)) {
-      if (base[id] !== state) payload["__srToggle__" + id] = state;
+      details.appendChild(list);
+      panel.appendChild(details);
+      container.appendChild(panel);
     }
-
-    const res = await postJSON(payload);
-    const txt = await res.text().catch(()=> "");
-    if (!res.ok || (txt && txt.startsWith("❌"))) throw new Error(txt || `HTTP ${res.status}`);
-
-    showToast("✅ Données enregistrées !");
-    handleSelectChange();
-  } catch (err) {
-    console.error(err);
-    showToast("❌ Échec de l’envoi", "red");
-  } finally {
-    btn.disabled = false;
+    showFormUI();
+    console.log("✅ Rendu des questions terminé.");
   }
-});
+
+  // Brancher les événements de gestion consignes
+  loadConsignes().catch(console.error);
+  const newBtn = document.getElementById("new-consigne-btn");
+  if (newBtn) newBtn.addEventListener("click", () => openConsigneModal());
+  const cancelBtn = document.getElementById("consigne-cancel");
+  if (cancelBtn) cancelBtn.addEventListener("click", closeConsigneModal);
+  const form = document.getElementById("consigne-form");
+  if (form) form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.currentTarget;
+    const payload = {
+      id: f.elements.id.value || null,
+      label: f.elements.label.value.trim(),
+      category: f.elements.category.value.trim(),
+      type: f.elements.type.value,
+      priority: parseInt(f.elements.priority.value || "2", 10),
+      frequency: f.elements.frequency.value.trim() || "Pratique délibérée"
+    };
+    try {
+      if (payload.id) {
+        await updateConsigne(payload);
+        showToast("✅ Consigne mise à jour");
+      } else {
+        await createConsigne(payload);
+        showToast("✅ Consigne créée");
+      }
+      closeConsigneModal();
+      await loadConsignes();
+      refreshCurrentView();
+    } catch (err) {
+      console.error(err);
+      showToast("❌ Erreur consigne", "red");
+    }
+  });
+}

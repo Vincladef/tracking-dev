@@ -327,8 +327,7 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
     streak = 0;
     _clearDelayFrom(responseRange);
     _clearDelayFrom(anchor);
-    const prevOn = !!srPrev.on;
-    const sr = { on: prevOn, unit: (mode === "daily" ? "days" : "iters"), n: streak, interval: 0 };
+    const sr = { on: true, unit: (mode === "daily" ? "days" : "iters"), n: streak, interval: 0 };
     _writeSRTag(anchor, sr);
     return (mode === "daily")
       ? { unit: "days", dueISO: null, interval: 0, n: streak }
@@ -351,8 +350,7 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
   if (interval <= 0) {
     _clearDelayFrom(responseRange);
     _clearDelayFrom(anchor);
-    const prevOn = !!srPrev.on;
-    const sr = { on: prevOn, unit: (mode === "daily" ? "days" : "iters"), n: streak, interval: 0 };
+    const sr = { on: true, unit: (mode === "daily" ? "days" : "iters"), n: streak, interval: 0 };
     _writeSRTag(anchor, sr);
     return (mode === "daily")
       ? { unit: "days", dueISO: null, interval: 0, n: streak }
@@ -369,8 +367,7 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
     _writeNoteWithTag(responseRange, human, { mode: 'daily', due: dueISO, base: String(baseDateISO_or_Category) });
     _writeNoteWithTag(anchor,       human, { mode: 'daily', due: dueISO, base: String(baseDateISO_or_Category) });
 
-    const prevOn = !!srPrev.on;
-    const sr = { on: prevOn, unit: "days", n: streak, interval: interval, due: dueISO };
+    const sr = { on: true, unit: "days", n: streak, interval: interval, due: dueISO };
     _writeSRTag(anchor, sr);
     return { unit: "days", dueISO, interval, n: streak };
   }
@@ -382,60 +379,10 @@ function decrementPracticeRemainForCategory(sheet, category, startRow, numRows, 
     _writeNoteWithTag(responseRange, human, { mode: 'practice', category, remain: String(interval) });
     _writeNoteWithTag(anchor,        human, { mode: 'practice', category, remain: String(interval) });
 
-    const prevOn = !!srPrev.on;
-    const sr = { on: prevOn, unit: "iters", n: streak, interval: interval };
+    const sr = { on: true, unit: "iters", n: streak, interval: interval };
     _writeSRTag(anchor, sr);
     return { unit: "iters", remain: interval, interval, n: streak };
   }
 
   return null;
-}
-
-/** ---------- PRIORITY & ROW ID TAGS ---------- 
- * [priority:1]  // 1 (haut), 2 (normal), 3 (secondaire)
- * [id:550e8400-e29b-41d4-a716-446655440000] // uuid stable par ligne
- */
-function _readSimpleTag(note, key) {
-  if (!note) return null;
-  const re = new RegExp(String.raw`^\s*\[${key}:(.+?)\]\s*$`);
-  const lines = note.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const m = lines[i].trim().match(re);
-    if (m) return m[1];
-  }
-  return null;
-}
-function _stripSimpleTag(note, key) {
-  if (!note) return "";
-  const re = new RegExp(String.raw`^\s*\[${key}:.+?\]\s*$`);
-  return note.split('\n').filter(l => !re.test(l.trim())).join('\n').trim();
-}
-function _writeSimpleTag(range, key, value) {
-  const cleaned = _stripSimpleTag(range.getNote(), key);
-  const tag = `[${key}:${value}]`;
-  range.setNote([cleaned, tag].filter(Boolean).join('\n').trim());
-}
-
-/** Priorité : 1..3 (défaut 2) */
-function getPriority(anchorRange) {
-  const p = parseInt(_readSimpleTag(anchorRange.getNote(), 'priority'), 10);
-  return (p === 1 || p === 2 || p === 3) ? p : 2;
-}
-function setPriority(anchorRange, p) {
-  p = (p === 1 || p === 2 || p === 3) ? p : 2;
-  _writeSimpleTag(anchorRange, 'priority', String(p));
-  return p;
-}
-
-/** ID de ligne stable (uuid), stocké en note d'ancre */
-function ensureRowId(anchorRange) {
-  let id = _readSimpleTag(anchorRange.getNote(), 'id');
-  if (!id) {
-    id = Utilities.getUuid();
-    _writeSimpleTag(anchorRange, 'id', id);
-  }
-  return id;
-}
-function getRowId(anchorRange) {
-  return _readSimpleTag(anchorRange.getNote(), 'id');
 }
