@@ -311,27 +311,24 @@ function doGet(e) {
       }
     }
 
-    // 3) SR automatique (score -> DELAYS)
+    // 3) SR automatique basé sur le tag [sr:...] écrit par applySRAfterAnswer
     if (isSpaced) {
-      const { score, lastDate } = computeScoreAndLastDate(row);
-      const delay = DELAYS[score];
-      let next = null;
-      if (lastDate) {
-        next = new Date(lastDate);
-        next.setHours(0,0,0,0);
-        next.setDate(next.getDate() + delay);
+      const sr = getSRInfo(anchor); // { on, unit, n, interval, due? }
+      if (sr.on && sr.unit === "days" && sr.due) {
+        const due = _parseISO(sr.due); // YYYY-MM-DD -> Date
+        const selISO = Utilities.formatDate(referenceDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+        const dueISO = Utilities.formatDate(due, Session.getScriptTimeZone(), "yyyy-MM-dd");
+        if (selISO < dueISO) {
+          include = false;
+          skipped = true;
+          nextDate = Utilities.formatDate(due, Session.getScriptTimeZone(), "dd/MM/yyyy");
+          reason = `✅ Réponse positive enregistrée récemment. Prochaine apparition prévue le ${nextDate}.`;
+        }
       }
-      const nextFR = next ? Utilities.formatDate(next, Session.getScriptTimeZone(), "dd/MM/yyyy") : null;
       spacedInfo = {
-        score,
-        lastDate: lastDate ? Utilities.formatDate(lastDate, Session.getScriptTimeZone(), "dd/MM/yyyy") : null,
-        nextDate: nextFR
+        sr: sr,
+        nextDate: nextDate
       };
-      if (!next || referenceDate >= next) include = true;
-      else if (isToday && referenceDate < next) {
-        include = false; skipped = true; nextDate = nextFR;
-        reason = `✅ Réponse positive enregistrée récemment. Prochaine apparition prévue le ${nextFR}.`;
-      }
     }
 
     // Priority & Row ID
@@ -643,26 +640,14 @@ function sendAllTelegramReminders() {
 
           let include = false;
           if (isSpaced) {
-            let score = 0;
-            let lastDate = null;
-            for (let col = headersTracking.length - 1; col >= 5; col--) {
-              const header = String(headersTracking[col] || "");
-              if (!/^\d{2}\/\d{2}\/\d{4}$/.test(header)) continue; // ignorer non-dates
-              const val = clean(r[col]);
-              if (!val) continue;
-              score += ANSWER_VALUES[val] ?? 0;
-              const [d, m, y] = header.split("/");
-              const parsed = new Date(`${y}-${m}-${d}`);
-              if (!lastDate || parsed > lastDate) lastDate = parsed;
+            const anchor = trackingSheet.getRange(i + 2, 1);
+            const sr = getSRInfo(anchor);
+            if (!sr.on || sr.unit !== "days" || !sr.due) {
+              include = true; // pas de due -> demander aujourd'hui
+            } else {
+              const due = _parseISO(sr.due);
+              include = (today >= due);
             }
-            score = Math.max(0, Math.min(6, Math.round(score)));
-            const delay = DELAYS[score];
-            if (lastDate) {
-              const next = new Date(lastDate);
-              next.setHours(0,0,0,0);
-              next.setDate(next.getDate() + delay);
-              include = today >= next;
-            } else include = true;
           }
 
           if (!isSpaced && (isQuotidien || isMatchingDay)) {
