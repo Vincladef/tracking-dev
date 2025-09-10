@@ -409,7 +409,7 @@ function doPost(e) {
 
     if (clean(data._action) === "consigne_create") {
       const lastRow = sheet.getLastRow()+1;
-      const defaultFreq = data.frequency || "Pratique délibérée";
+      const defaultFreq = data.frequency || "pratique délibérée";
       sheet.getRange(lastRow, 1).setValue(""); // ancre
       sheet.getRange(lastRow, 2).setValue(data.category || "");
       sheet.getRange(lastRow, 3).setValue(data.type || "");
@@ -707,8 +707,8 @@ function migrateAllToPracticeDeliberee() {
     const freq = (values[i][3]||"").toString().toLowerCase();
     if (!label) continue;
     if (freq.includes("archiv")) continue; // ne pas toucher aux archivées
-    // forcer Pratique délibérée + SR iters ON
-    freqCell.setValue("Pratique délibérée");
+    // forcer pratique délibérée + SR iters ON
+    freqCell.setValue("pratique délibérée");
     const anchor = sh.getRange(row,1);
     setSRToggle(anchor, true, "iters");
   }

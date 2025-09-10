@@ -901,7 +901,7 @@ async function initApp() {
       arch.onclick = async () => {
         await updateConsigne({
           id: c.id,
-          frequency: archived ? "Pratique délibérée" : "archivé"
+          frequency: archived ? "pratique délibérée" : "archivé"
         });
         showToast(archived ? "✅ Désarchivée" : "✅ Archivée");
         await loadConsignes();
@@ -986,7 +986,7 @@ async function initApp() {
         category: (document.getElementById("consigne-category")?.value || "").trim(),
         type: form.elements.type.value,
         priority: parseInt(form.elements.priority.value || "2", 10),
-        frequency: daily ? (readFreqMulti(document.getElementById("freq-multi")) || "Quotidien") : "Pratique délibérée"
+        frequency: daily ? (readFreqMulti(document.getElementById("freq-multi")) || "Quotidien") : "pratique délibérée"
       };
       if (!payload.label) { showToast("❌ Label requis", "red"); return; }
       // Spinner sur "Enregistrer"
@@ -1058,7 +1058,7 @@ async function initApp() {
       _action: "consigne_create",
       category: payload.category,
       type: payload.type,
-      frequency: payload.frequency || "Pratique délibérée",
+      frequency: payload.frequency || "pratique délibérée",
       label: payload.label,
       priority: payload.priority,
       apiUrl
@@ -1320,7 +1320,7 @@ async function initApp() {
     archBtn.className = "text-gray-700 hover:underline";
     archBtn.textContent = archived ? "Désarchiver" : "Archiver";
     archBtn.onclick = async () => {
-      await updateConsigne({ id: q.id, frequency: archived ? "Pratique délibérée" : "archivé" });
+      await updateConsigne({ id: q.id, frequency: archived ? "pratique délibérée" : "archivé" });
       showToast(archived ? "✅ Désarchivée" : "✅ Archivée");
       refreshCurrentView();
     };
@@ -1501,7 +1501,7 @@ async function initApp() {
       archBtn.className = "text-gray-700 hover:underline";
       archBtn.textContent = archived ? "Désarchiver" : "Archiver";
       archBtn.onclick = async () => {
-        await updateConsigne({ id: q.id, frequency: archived ? "Pratique délibérée" : "archivé" });
+        await updateConsigne({ id: q.id, frequency: archived ? "pratique délibérée" : "archivé" });
         showToast(archived ? "✅ Désarchivée" : "✅ Archivée");
         refreshCurrentView();
       };
