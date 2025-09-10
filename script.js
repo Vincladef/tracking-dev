@@ -194,7 +194,7 @@ async function initApp() {
 
   // ====== Fréquences et catégories (helpers modal) ======
   const WEEKDAYS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"];
-  const FREQ_SPECIAL = ["Quotidien", "archivé"];
+  const FREQ_SPECIAL = ["Quotidien"]; // archivé retiré
   function parseFreqString(s) {
     const out = new Set();
     String(s||"").split(",").map(x=>x.trim()).filter(Boolean).forEach(x => out.add(x));
@@ -232,7 +232,6 @@ async function initApp() {
   function readFreqMulti(container) {
     const set = new Set();
     container.querySelectorAll('input[type="checkbox"]').forEach(cb => { if (cb.checked) set.add(cb.dataset.freqLabel); });
-    if (set.has("archivé")) return "archivé";
     return freqSetToString(set);
   }
   function setupSRToggle(btn, initialOn) {
@@ -244,6 +243,31 @@ async function initApp() {
     paint();
     btn.onclick = () => { on = !on; paint(); };
     return () => on;
+  }
+
+  function addInlineSRToggle(wrapper, q){
+    window.__srToggles  = window.__srToggles || {};
+    window.__srBaseline = window.__srBaseline || {};
+    const srCurrent = q.scheduleInfo?.sr || { on:true };
+    if (!(q.id in window.__srBaseline)) window.__srBaseline[q.id] = srCurrent.on ? "on" : "off";
+    if (!(q.id in window.__srToggles))  window.__srToggles[q.id]  = srCurrent.on ? "on" : "off";
+    const row = document.createElement("div");
+    row.className = "mt-2 flex items-center gap-3";
+    const label = document.createElement("span");
+    label.className = "text-sm text-gray-700";
+    label.textContent = "Répétition espacée (délai auto) :";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    const paint = ()=>{
+      const on = window.__srToggles[q.id] === "on";
+      btn.textContent = on ? "ON" : "OFF";
+      btn.className = "px-2 py-1 rounded border text-sm " + (on ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-700 border-gray-200");
+    };
+    btn.onclick = ()=>{ window.__srToggles[q.id] = (window.__srToggles[q.id] === "on") ? "off" : "on"; paint(); };
+    paint();
+    row.appendChild(label);
+    row.appendChild(btn);
+    wrapper.appendChild(row);
   }
 
   // Ordonne l'historique pour l'affichage en liste: RÉCENT -> ANCIEN
@@ -1200,7 +1224,7 @@ async function initApp() {
       }
 
       wrapper.appendChild(input);
-      addDelayUI(wrapper, q); // Appel du nouveau helper ici
+      addInlineSRToggle(wrapper, q);
     
       // 📓 Historique (compatible daily et practice)
       if (q.history && q.history.length > 0) {
@@ -1375,7 +1399,7 @@ async function initApp() {
 
         // 1) UI Délai (mêmes options que pour les visibles)
         const delayWrap = document.createElement("div");
-        addDelayUI(delayWrap, item);
+        addInlineSRToggle(delayWrap, item);
         content.appendChild(delayWrap);
 
         // 2) Historique (même principe : bouton + bloc avec graphe + liste)
