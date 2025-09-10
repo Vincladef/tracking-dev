@@ -62,6 +62,7 @@ const appState = {
   delayValues: {},
   srToggles: {},
   srBaseline: {},
+  __srAutoPushed: {}, // évite les double-envois
 };
 
 fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
@@ -152,8 +153,7 @@ function bindFieldAutosave(inputEl, qid) {
   console.log("bindFieldAutosave appelé pour:", qid, inputEl.tagName);
   
   const push = () => {
-    let val = inputEl.value;
-    if (inputEl.tagName === "SELECT") val = canonicalizeLikert(val);
+    const val = inputEl.value; // on envoie la valeur brute
     console.log("Auto-save déclenché:", qid, "=", val);
     queueSoftSave({ [qid]: val }, inputEl);
   };
@@ -339,9 +339,21 @@ async function initApp() {
   }
 
   function addInlineSRToggle(wrapper, q){
-    const srCurrent = q.scheduleInfo?.sr || { on:true };
+    const srCurrent = q.scheduleInfo?.sr || { on:true }; // ON par défaut (souhaité)
+    const hasSrFromBackend = !!(q.scheduleInfo && Object.prototype.hasOwnProperty.call(q.scheduleInfo, "sr"));
+
     if (!(q.id in appState.srBaseline)) appState.srBaseline[q.id] = srCurrent.on ? "on" : "off";
     if (!(q.id in appState.srToggles))  appState.srToggles[q.id]  = srCurrent.on ? "on" : "off";
+
+    // 🔁 Si le backend n'a pas d'info SR mais l'UI est ON par défaut → on synchronise une fois
+    if (!hasSrFromBackend && srCurrent.on && !appState.__srAutoPushed[q.id]) {
+      appState.__srAutoPushed[q.id] = true;
+      // poste __srToggle__<id> = "on" via autosave (avec le contexte _mode/_date ou _category déjà géré dans queueSoftSave)
+      queueSoftSave({ ["__srToggle__" + q.id]: "on" }, wrapper);
+      // baseline & toggle à jour pour éviter un 2e post
+      appState.srBaseline[q.id] = "on";
+      appState.srToggles[q.id]  = "on";
+    }
     const row = document.createElement("div");
     row.className = "mt-2 flex items-center gap-3";
     const label = document.createElement("span");
@@ -1047,6 +1059,32 @@ async function initApp() {
           })});
           showToast("✅ Consigne créée");
           flashSaved(document.querySelector("#consigne-modal .px-5.py-4.border-t"));
+
+          // ➕ Si l'utilisateur a laissé SR sur ON dans le modal → applique au backend
+          try {
+            if (getSR()) {
+              const list = await apiFetch("GET", `?mode=consignes`);
+              const arr = Array.isArray(list) ? list : [];
+              // Heuristique: même label+cat+type+priority → prend la plus récente (ou la première si la liste est déjà triée)
+              const match = arr.find(x =>
+                x.label === payload.label &&
+                (x.category || "") === (payload.category || "") &&
+                (x.type || "") === (payload.type || "") &&
+                (x.priority ?? 2) === (payload.priority ?? 2)
+              );
+              if (match?.id) {
+                const tKey = "__srToggle__" + match.id;
+                const selected = document.getElementById("date-select")?.selectedOptions[0];
+                const mode = selected?.dataset.mode || "daily";
+                const body = { apiUrl, [tKey]: "on" };
+                if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
+                else { body._mode = "practice"; body._category = selected.dataset.category; }
+                await fetch(WORKER_URL, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+              }
+            }
+          } catch (e) {
+            console.warn("SR auto-ON après création : impossible d'appliquer maintenant", e);
+          }
         }
         closeConsigneModal();
         refreshCurrentView();
