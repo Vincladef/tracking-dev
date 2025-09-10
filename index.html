@@ -43,52 +43,99 @@
     </div>
   </div>
 
-  <!-- Modal création / édition -->
-  <div id="consigne-modal" class="fixed inset-0 bg-black bg-opacity-30 hidden z-50">
-    <div class="max-w-lg mx-auto mt-24 bg-white rounded-xl shadow p-5">
-      <h3 id="consigne-modal-title" class="text-lg font-semibold mb-3">Nouvelle consigne</h3>
-      <form id="consigne-form" class="space-y-3">
-        <input type="hidden" name="id" />
-        <div>
-          <label class="text-sm text-gray-700">Label</label>
-          <input name="label" class="mt-1 w-full border rounded px-3 py-2" required />
-        </div>
-        <!-- Catégorie (créatable + suggestions) -->
-        <label class="block text-sm font-medium mt-3">Catégorie</label>
-        <input list="categories-datalist" id="consigne-category" name="category"
-               class="mt-1 p-2 border rounded w-full bg-white text-gray-800" placeholder="Tape ou choisis…">
-        <datalist id="categories-datalist"></datalist>
-        <div>
-          <label class="text-sm text-gray-700">Type</label>
-          <select name="type" class="mt-1 w-full border rounded px-3 py-2">
-            <option>Oui/Non</option>
-            <option>Likert/Menu</option>
-            <option>Plus long</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-sm text-gray-700">Priorité</label>
-          <select name="priority" class="mt-1 w-full border rounded px-3 py-2">
-            <option value="1">P1</option>
-            <option value="2" selected>P2</option>
-            <option value="3">P3</option>
-          </select>
-        </div>
-        <!-- Fréquence (multi) -->
-        <label class="block text-sm font-medium mt-3">Fréquence</label>
-        <div id="freq-multi" class="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm"></div>
+  <!-- MODAL -->
+  <div id="consigne-modal" class="fixed inset-0 z-50 hidden">
+    <!-- backdrop -->
+    <div class="absolute inset-0 bg-black/40" data-close="backdrop"></div>
 
-        <!-- SR ON/OFF -->
-        <div class="mt-3 flex items-center gap-3">
-          <span class="text-sm text-gray-700">Répétition espacée :</span>
-          <button type="button" id="sr-toggle" class="px-2 py-1 rounded border text-sm bg-gray-50">OFF</button>
+    <!-- dialog wrapper centré -->
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col">
+
+        <!-- header -->
+        <div class="px-5 py-4 border-b flex items-start justify-between">
+          <h3 id="consigne-modal-title" class="text-lg font-semibold">Modifier la consigne</h3>
+          <button type="button" id="consigne-close-x"
+                  class="p-2 -mr-2 rounded hover:bg-gray-100"
+                  aria-label="Fermer">✕</button>
         </div>
 
-        <div class="pt-2 flex items-center justify-end gap-2">
-          <button type="button" id="consigne-cancel" class="px-3 py-2 border rounded">Annuler</button>
-          <button type="submit" class="px-3 py-2 bg-green-600 text-white rounded">Enregistrer</button>
+        <!-- body scrollable -->
+        <div class="px-5 py-4 space-y-4 overflow-y-auto" id="consigne-body">
+          <form id="consigne-form" class="space-y-4">
+            <input type="hidden" name="id" />
+
+            <div>
+              <label class="block text-sm font-medium">Label</label>
+              <input name="label" class="mt-1 p-2 border rounded w-full bg-white text-gray-800" />
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium">Catégorie</label>
+              <input list="categories-datalist" id="consigne-category" name="category"
+                     class="mt-1 p-2 border rounded w-full bg-white text-gray-800"
+                     placeholder="Tape ou choisis…" />
+              <datalist id="categories-datalist"></datalist>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium">Type</label>
+              <select name="type" class="mt-1 p-2 border rounded w-full bg-white text-gray-800">
+                <option>Oui/Non</option>
+                <option>Menu (Likert)</option>
+                <option>Texte court</option>
+                <option>Texte plus long</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium">Priorité</label>
+              <select name="priority" class="mt-1 p-2 border rounded w-full bg-white text-gray-800">
+                <option value="1">P1</option>
+                <option value="2" selected>P2</option>
+                <option value="3">P3</option>
+              </select>
+            </div>
+
+            <!-- Mode -->
+            <div>
+              <label class="block text-sm font-medium">Mode</label>
+              <div id="mode-group" class="mt-2 flex gap-3 text-sm">
+                <label class="inline-flex items-center gap-2 border rounded px-2 py-1 bg-white">
+                  <input type="radio" name="modeConsigne" value="daily" checked />
+                  <span>Journalier</span>
+                </label>
+                <label class="inline-flex items-center gap-2 border rounded px-2 py-1 bg-white">
+                  <input type="radio" name="modeConsigne" value="practice" />
+                  <span>Pratique délibérée</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Fréquence (uniquement pour “Journalier”) -->
+            <div id="freq-block">
+              <label class="block text-sm font-medium">Fréquence</label>
+              <div id="freq-multi" class="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm"></div>
+              <p class="mt-1 text-xs text-gray-500">Coche des jours et/ou “Quotidien”.</p>
+            </div>
+
+            <!-- SR toggle -->
+            <div class="mt-2 flex items-center gap-3">
+              <span class="text-sm text-gray-700">Répétition espacée :</span>
+              <button type="button" id="sr-toggle"
+                      class="px-2 py-1 rounded border text-sm bg-gray-50">OFF</button>
+            </div>
+          </form>
         </div>
-      </form>
+
+        <!-- footer sticky -->
+        <div class="px-5 py-4 border-t flex items-center justify-end gap-3">
+          <button type="button" id="consigne-cancel"
+                  class="px-3 py-2 rounded border bg-white hover:bg-gray-50">Annuler</button>
+          <button type="submit" form="consigne-form"
+                  class="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">Enregistrer</button>
+        </div>
+      </div>
     </div>
   </div>
 

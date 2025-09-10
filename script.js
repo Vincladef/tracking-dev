@@ -194,7 +194,7 @@ async function initApp() {
 
   // ====== Fréquences et catégories (helpers modal) ======
   const WEEKDAYS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"];
-  const FREQ_SPECIAL = ["Quotidien", "Répétition espacée", "Pratique délibérée", "archivé"];
+  const FREQ_SPECIAL = ["Quotidien", "archivé"];
   function parseFreqString(s) {
     const out = new Set();
     String(s||"").split(",").map(x=>x.trim()).filter(Boolean).forEach(x => out.add(x));
@@ -762,15 +762,34 @@ async function initApp() {
 
     const getSR = setupSRToggle(document.getElementById("sr-toggle"), c?.sr === "on");
 
+    // Mode (daily vs practice)
+    const isPractice = /pratique\s*d[ée]lib[ée]r[ée]e/i.test(c?.frequency || "");
+    const modeDaily = form.querySelector('[name="modeConsigne"][value="daily"]');
+    const modePractice = form.querySelector('[name="modeConsigne"][value="practice"]');
+    const freqBlock = document.getElementById("freq-block");
+    if (modeDaily && modePractice) {
+      modePractice.checked = isPractice;
+      modeDaily.checked = !isPractice;
+      buildFreqMulti(freqBox, isPractice ? "" : (c?.frequency || ""));
+      if (freqBlock) freqBlock.classList.toggle("hidden", isPractice);
+      form.querySelectorAll('[name="modeConsigne"]').forEach(r=>{
+        r.addEventListener("change", ()=>{
+          const daily = modeDaily.checked;
+          if (freqBlock) freqBlock.classList.toggle("hidden", !daily);
+        });
+      });
+    }
+
     form.onsubmit = async (e) => {
       e.preventDefault();
+      const daily = form.querySelector('[name="modeConsigne"][value="daily"]')?.checked !== false;
       const payload = {
         id: form.elements.id.value || null,
         label: form.elements.label.value.trim(),
         category: (document.getElementById("consigne-category")?.value || "").trim(),
         type: form.elements.type.value,
         priority: parseInt(form.elements.priority.value || "2", 10),
-        frequency: readFreqMulti(document.getElementById("freq-multi")) || "Pratique délibérée"
+        frequency: daily ? (readFreqMulti(document.getElementById("freq-multi")) || "Quotidien") : "Pratique délibérée"
       };
       if (!payload.label) { showToast("❌ Label requis", "red"); return; }
       try {
@@ -802,12 +821,22 @@ async function initApp() {
     };
 
     modal.classList.remove("hidden");
+    // Fermeture (ESC, X, backdrop, bouton Annuler)
+    const cancelBtn = document.getElementById("consigne-cancel");
+    if (cancelBtn) cancelBtn.onclick = closeConsigneModal;
+    const closeX = document.getElementById("consigne-close-x");
+    if (closeX) closeX.onclick = closeConsigneModal;
+    const backdrop = modal.querySelector('[data-close="backdrop"]');
+    if (backdrop) backdrop.onclick = closeConsigneModal;
+    document.addEventListener("keydown", _onEsc);
   }
 
-  function closeConsigneModal() {
+  function closeConsigneModal(){
     const modal = document.getElementById("consigne-modal");
     if (modal) modal.classList.add("hidden");
+    document.removeEventListener("keydown", _onEsc);
   }
+  function _onEsc(e){ if (e.key === "Escape") closeConsigneModal(); }
 
   async function createConsigne(payload) {
     const body = {
