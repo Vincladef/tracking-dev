@@ -1,4 +1,23 @@
 // 🧑 Identifier l’utilisateur depuis l’URL
+const WORKER_URL = "https://tight-snowflake-cdad.como-denizot.workers.dev/";
+
+async function apiFetch(method, pathOrParams, bodyObj) {
+  const payload = {
+    _proxy: true,
+    method,
+    apiUrl,
+    query: pathOrParams || "",
+    body: bodyObj || null
+  };
+  const res = await fetch(WORKER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const ct = res.headers.get("content-type") || "";
+  if (!res.ok) throw new Error(await res.text());
+  return ct.includes("application/json") ? res.json() : res.text();
+}
 const urlParams = new URLSearchParams(location.search);
 const user = urlParams.get("user")?.toLowerCase();
 
@@ -116,8 +135,7 @@ async function initApp() {
 
     // Groupe Mode pratique (si dispo)
     try {
-      const res = await fetch(`${apiUrl}?mode=practice`);
-      const cats = await res.json();
+      const cats = await apiFetch("GET", `?mode=practice`);
       if (Array.isArray(cats) && cats.length) {
         // Séparateur visuel (dans un optgroup valide)
         const sepGroup = document.createElement("optgroup");
@@ -325,8 +343,7 @@ async function initApp() {
     if (loader) loader.classList.remove("hidden");
     console.log(`📡 Chargement des questions pour la date : ${dateISO}`);
 
-    fetch(`${apiUrl}?date=${encodeURIComponent(dateISO)}`)
-      .then(res => res.json())
+    apiFetch("GET", `?date=${encodeURIComponent(dateISO)}`)
       .then(questions => {
         console.log(`✅ ${questions.length} question(s) chargée(s).`);
         renderQuestions(questions);
@@ -345,8 +362,7 @@ async function initApp() {
     console.log(`📡 Chargement des questions pour la catégorie : ${category}`);
 
     try {
-      const res = await fetch(`${apiUrl}?mode=practice&category=${encodeURIComponent(category)}`);
-      const questions = await res.json();
+      const questions = await apiFetch("GET", `?mode=practice&category=${encodeURIComponent(category)}`);
       console.log(`✅ ${questions.length} question(s) de pratique chargée(s).`);
       renderQuestions(questions);
     } catch (e) {
@@ -565,8 +581,7 @@ async function initApp() {
 
   // ====== GESTION CONSIGNES (UI) ======
   async function loadConsignes() {
-    const res = await fetch(`${apiUrl}?mode=consignes`);
-    const list = await res.json();
+    const list = await apiFetch("GET", `?mode=consignes`);
     renderConsignesManager(Array.isArray(list) ? list : []);
   }
 
@@ -661,7 +676,7 @@ async function initApp() {
       priority: payload.priority,
       apiUrl
     };
-    await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    await apiFetch("POST", "", body);
   }
 
   async function updateConsigne(payload) {
@@ -675,12 +690,12 @@ async function initApp() {
       priority: payload.priority,
       apiUrl
     };
-    await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    await apiFetch("POST", "", body);
   }
 
   async function deleteConsigne(id) {
     const body = { _action: "consigne_delete", id, apiUrl };
-    await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    await apiFetch("POST", "", body);
   }
 
   function addDelayUI(wrapper, q) {
