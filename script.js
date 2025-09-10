@@ -108,6 +108,39 @@ function showToast(message, tone = "green") {
   t._hideTimer = setTimeout(() => t.classList.add("hidden"), 2400);
 }
 
+function flashSaved(anchorEl) {
+  try {
+    const host = anchorEl || document.body;
+    const badge = document.createElement("span");
+    badge.textContent = "✔";
+    badge.style.cssText = `
+      position:absolute; right:-6px; top:-6px;
+      background:#10b981; color:white; width:18px; height:18px;
+      display:flex; align-items:center; justify-content:center;
+      border-radius:9999px; font-size:12px; box-shadow:0 1px 4px rgba(0,0,0,.15);
+      opacity:0; transform:scale(.6); transition:opacity .15s, transform .2s;
+      z-index: 10;
+    `;
+    const wrap = document.createElement("span");
+    wrap.style.position = "relative";
+    wrap.style.display = "inline-block";
+    host.appendChild(wrap);
+    wrap.appendChild(badge);
+    requestAnimationFrame(() => { badge.style.opacity = "1"; badge.style.transform = "scale(1)"; });
+    setTimeout(() => { badge.style.opacity = "0"; }, 800);
+    setTimeout(() => { wrap.remove(); }, 1100);
+  } catch {}
+}
+
+function bindFieldAutosave(inputEl, qid) {
+  const push = (val) => { queueSoftSave({ [qid]: val }); flashSaved(inputEl.parentElement); };
+  if (inputEl.tagName === "SELECT") {
+    inputEl.addEventListener("change", () => push(inputEl.value));
+  } else if (inputEl.tagName === "TEXTAREA" || inputEl.type === "text") {
+    inputEl.addEventListener("input", () => push(inputEl.value));
+  }
+}
+
 async function initApp() {
   // ✅ Mémoire des délais sélectionnés (clé -> valeur)
   window.__delayValues = window.__delayValues || {};
@@ -247,20 +280,25 @@ async function initApp() {
 
   function enableDragScroll(scrollEl, handleEl) {
     if (!scrollEl || !handleEl) return;
-    let active = false, startY = 0, startTop = 0;
+    let active = false, startY = 0, startTop = 0, pid = null;
+    handleEl.style.touchAction = "none";
+    handleEl.style.cursor = "ns-resize";
     handleEl.addEventListener("pointerdown", (e) => {
-      active = true;
-      startY = e.clientY;
-      startTop = scrollEl.scrollTop;
-      handleEl.setPointerCapture(e.pointerId);
+      active = true; pid = e.pointerId; startY = e.clientY; startTop = scrollEl.scrollTop;
+      handleEl.setPointerCapture(pid);
       handleEl.classList.add("bg-gray-400");
+      e.preventDefault();
     });
     handleEl.addEventListener("pointermove", (e) => {
       if (!active) return;
       const dy = e.clientY - startY;
       scrollEl.scrollTop = startTop - dy * 1.2;
     });
-    const stop = () => { active = false; handleEl.classList.remove("bg-gray-400"); };
+    const stop = () => {
+      if (!active) return;
+      active = false; handleEl.classList.remove("bg-gray-400");
+      try { handleEl.releasePointerCapture(pid); } catch {}
+    };
     handleEl.addEventListener("pointerup", stop);
     handleEl.addEventListener("pointercancel", stop);
   }
@@ -756,6 +794,21 @@ async function initApp() {
     }, 600);
   }
 
+  // Flush auto-save best-effort au déchargement
+  window.addEventListener("beforeunload", () => {
+    if (_softTimer) {
+      clearTimeout(_softTimer);
+      _softTimer = null;
+      const selected = document.getElementById("date-select")?.selectedOptions[0];
+      if (!selected) return;
+      const mode = selected.dataset.mode || "daily";
+      const body = { apiUrl, ..._softBuffer };
+      if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
+      else { body._mode = "practice"; body._category = selected.dataset.category; }
+      navigator.sendBeacon(WORKER_URL, new Blob([JSON.stringify(body)], { type:"application/json" }));
+    }
+  });
+
   // ====== GESTION CONSIGNES (UI) ======
   async function loadConsignes() {
     const list = await apiFetch("GET", `?mode=consignes`);
@@ -900,6 +953,7 @@ async function initApp() {
           body[tKey] = getSR() ? "on" : "off";
           await apiFetch("POST", "", body);
           showToast("✅ Consigne mise à jour");
+          flashSaved(document.querySelector("#consigne-modal .px-5.py-4.border-t"));
         } else {
           await apiFetch("POST", "", {
             _action: "consigne_create",
@@ -911,6 +965,7 @@ async function initApp() {
             apiUrl
           });
           showToast("✅ Consigne créée");
+          flashSaved(document.querySelector("#consigne-modal .px-5.py-4.border-t"));
         }
         closeConsigneModal();
         refreshCurrentView();
@@ -1043,6 +1098,8 @@ async function initApp() {
 
     const setValue = (n) => {
       window.__delayValues[key] = String(n);
+      // auto-save doux immédiat
+      queueSoftSave({ [key]: String(n) });
       if (n === -1) {
         info.textContent = "Délai : annulé";
       } else {
@@ -1051,6 +1108,7 @@ async function initApp() {
           : `Délai choisi : ${n} itérations`;
       }
       pop.classList.add("hidden");
+      flashSaved(row);
     };
 
     options.forEach(opt => {
@@ -1300,14 +1358,15 @@ async function initApp() {
       }
 
       wrapper.appendChild(input);
-      // Auto-save doux
+      // Auto-save doux + mini anim
       if (input.tagName === "SELECT" || input.tagName === "TEXTAREA" || input.type === "text") {
-        input.addEventListener("input", () => { queueSoftSave({ [q.id]: input.value }); });
+        bindFieldAutosave(input, q.id);
       } else {
         input.querySelectorAll('input[type="radio"]').forEach(r => {
           r.addEventListener("change", () => {
             const val = input.querySelector('input[type="radio"]:checked')?.value || "";
             queueSoftSave({ [q.id]: val });
+            flashSaved(wrapper);
           });
         });
       }
