@@ -15,8 +15,34 @@ async function apiFetch(method, pathOrParams, bodyObj) {
     body: JSON.stringify(payload)
   });
   const ct = res.headers.get("content-type") || "";
-  if (!res.ok) throw new Error(await res.text());
-  return ct.includes("application/json") ? res.json() : res.text();
+  const ok = res.ok;
+
+  if (ct.includes("application/json")) {
+    const json = await res.json();
+    if (!ok) throw new Error(JSON.stringify(json).slice(0, 300));
+    return json;
+  } else {
+    const text = await res.text();
+    if (!ok) throw new Error(text.slice(0, 300));
+    try { return JSON.parse(text); } catch { return text; }
+  }
+}
+
+function toQuestions(raw) {
+  console.log("↩︎ Réponse brute:", { type: typeof raw, raw });
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw?.questions)) return raw.questions;
+  if (Array.isArray(raw?.data))      return raw.data;
+  if (Array.isArray(raw?.items))     return raw.items;
+  if (typeof raw === "string") {
+    const txt = raw.trim();
+    if (txt.startsWith("<!DOCTYPE") || txt.startsWith("<html")) {
+      console.error("⚠️ Le backend renvoie du HTML (probable erreur Apps Script).");
+      return null;
+    }
+    try { const j = JSON.parse(txt); return toQuestions(j); } catch { return null; }
+  }
+  return null;
 }
 const urlParams = new URLSearchParams(location.search);
 const user = urlParams.get("user")?.toLowerCase();
@@ -344,7 +370,14 @@ async function initApp() {
     console.log(`📡 Chargement des questions pour la date : ${dateISO}`);
 
     apiFetch("GET", `?date=${encodeURIComponent(dateISO)}`)
-      .then(questions => {
+      .then(raw => {
+        const questions = toQuestions(raw);
+        if (!Array.isArray(questions)) {
+          console.error("Réponse inattendue (pas un tableau) :", raw);
+          showToast("❌ Format de données inattendu", "red");
+          document.getElementById("loader")?.classList.add("hidden");
+          return;
+        }
         console.log(`✅ ${questions.length} question(s) chargée(s).`);
         renderQuestions(questions);
       })
@@ -362,7 +395,14 @@ async function initApp() {
     console.log(`📡 Chargement des questions pour la catégorie : ${category}`);
 
     try {
-      const questions = await apiFetch("GET", `?mode=practice&category=${encodeURIComponent(category)}`);
+      const raw = await apiFetch("GET", `?mode=practice&category=${encodeURIComponent(category)}`);
+      const questions = toQuestions(raw);
+      if (!Array.isArray(questions)) {
+        console.error("Réponse inattendue (pas un tableau) :", raw);
+        showToast("❌ Format de données inattendu", "red");
+        document.getElementById("loader")?.classList.add("hidden");
+        return;
+      }
       console.log(`✅ ${questions.length} question(s) de pratique chargée(s).`);
       renderQuestions(questions);
     } catch (e) {
