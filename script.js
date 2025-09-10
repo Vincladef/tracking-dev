@@ -1,4 +1,4 @@
-// 🧑 Identifier l’utilisateur depuis l’URL
+// SCRIPT.JS : 🧑 Identifier l’utilisateur depuis l’URL
 const WORKER_URL = "https://tight-snowflake-cdad.como-denizot.workers.dev/";
 
 async function apiFetch(method, pathOrParams, bodyObj) {
@@ -1332,9 +1332,23 @@ async function initApp() {
     delBtn.textContent = "Supprimer";
     delBtn.onclick = async () => {
       if (!confirm("Supprimer définitivement cette consigne ?")) return;
-      await deleteConsigne(q.id);
-      showToast("🗑️ Supprimée");
-      refreshCurrentView();
+
+      // ✅ UI optimiste : on retire la carte tout de suite
+      const card = wrapper;
+      const parent = card.parentElement;
+      card.remove();
+
+      try {
+        await deleteConsigne(q.id);
+        showToast("🗑️ Supprimée");
+        // on peut recharger en arrière-plan pour être 100% synchro
+        refreshCurrentView();
+      } catch (e) {
+        // rollback en cas d'échec
+        if (parent) parent.appendChild(card);
+        showToast("❌ Erreur de suppression", "red");
+        console.error(e);
+      }
     };
     actions.appendChild(delBtn);
     wrapper.appendChild(actions);
@@ -1470,245 +1484,7 @@ async function initApp() {
         return;
       }
       
-      const wrapper = document.createElement("div");
-      wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
-
-      const label = document.createElement("label");
-      label.className = "block text-lg font-semibold mb-2";
-      label.textContent = q.label;
-      wrapper.appendChild(label);
-      // Actions inline (Modifier / Archiver / Supprimer)
-      const actions = document.createElement("div");
-      actions.className = "mt-1 flex items-center gap-3 text-sm";
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "text-blue-600 hover:underline";
-      editBtn.textContent = "Modifier";
-      editBtn.onclick = () => openConsigneModal({
-        id: q.id,
-        label: q.label,
-        category: q.category,
-        type: q.type || "Oui/Non",
-        priority: q.priority ?? 2,
-        frequency: q.frequency || "",
-        sr: (q.scheduleInfo?.sr?.on ? "on" : "off")
-      });
-      actions.appendChild(editBtn);
-
-      const archived = (q.frequency || "").toLowerCase().includes("archiv");
-      const archBtn = document.createElement("button");
-      archBtn.type = "button";
-      archBtn.className = "text-gray-700 hover:underline";
-      archBtn.textContent = archived ? "Désarchiver" : "Archiver";
-      archBtn.onclick = async () => {
-        await updateConsigne({ id: q.id, frequency: archived ? "pratique délibérée" : "archivé" });
-        showToast(archived ? "✅ Désarchivée" : "✅ Archivée");
-        refreshCurrentView();
-      };
-      actions.appendChild(archBtn);
-
-      const delBtn = document.createElement("button");
-      delBtn.type = "button";
-      delBtn.className = "text-red-600 hover:underline";
-      delBtn.textContent = "Supprimer";
-      delBtn.onclick = async () => {
-        if (!confirm("Supprimer définitivement cette consigne ?")) return;
-        await deleteConsigne(q.id);
-        showToast("🗑️ Supprimée");
-        refreshCurrentView();
-      };
-      actions.appendChild(delBtn);
-      wrapper.appendChild(actions);
-
-      // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
-      let referenceAnswer = "";
-      if (q.history && Array.isArray(q.history)) {
-        const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
-        if (dateISO) {
-          const entry = q.history.find(entry => {
-            if (entry?.date) {
-              const [dd, mm, yyyy] = entry.date.split("/");
-              const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-              return entryDateISO === dateISO;
-            }
-            return false;
-          });
-          referenceAnswer = entry?.value || "";
-        }
-      }
-      let input;
-      const type = (q.type || "").toLowerCase();
-
-      if (type.includes("oui")) {
-        input = document.createElement("div");
-        input.className = "space-x-6 text-gray-700";
-        input.innerHTML = `<label><input type="radio" name="${q.id}" value="Oui" class="mr-1" ${referenceAnswer === "Oui" ? "checked" : ""}>Oui</label>
-          <label><input type="radio" name="${q.id}" value="Non" class="mr-1" ${referenceAnswer === "Non" ? "checked" : ""}>Non</label>`;
-      } else if (type.includes("menu") || type.includes("likert")) {
-        input = document.createElement("select");
-        input.name = q.id;
-        input.className = "mt-1 p-2 border rounded w-full text-gray-800 bg-white";
-        ["", "Oui", "Plutôt oui", "Moyen", "Plutôt non", "Non", "Pas de réponse"].forEach(opt => {
-          const option = document.createElement("option");
-          option.value = opt;
-          option.textContent = opt;
-          if (opt === referenceAnswer) option.selected = true;
-          input.appendChild(option);
-        });
-      } else if (type.includes("plus long")) {
-        input = document.createElement("textarea");
-        input.name = q.id;
-        input.rows = 4;
-        // sm = mobile ; md = ≥768px
-        input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
-        input.value = referenceAnswer;
-      } else {
-        input = document.createElement("input");
-        input.name = q.id;
-        input.type = "text";
-        input.className = "mt-1 p-2 border rounded w-full bg-white text-gray-800 text-sm md:text-base leading-tight";
-        input.value = referenceAnswer;
-      }
-
-      wrapper.appendChild(input);
-      // Auto-save doux + mini anim
-      console.log("Type de champ créé:", q.id, "tagName:", input.tagName, "type:", input.type);
-      if (input.tagName === "SELECT") {
-        console.log("Auto-save activé pour SELECT:", q.id);
-        bindFieldAutosave(input, q.id);
-        // Backup manuel pour SELECT
-        input.addEventListener("change", () => {
-          console.log("Backup SELECT save:", q.id, input.value);
-          queueSoftSave({ [q.id]: canonicalizeLikert(input.value) }, wrapper);
-          flashSaved(wrapper);
-        });
-      } else if (input.tagName === "TEXTAREA") {
-        console.log("Auto-save activé pour TEXTAREA:", q.id);
-        bindFieldAutosave(input, q.id);
-        // Backup manuel pour TEXTAREA
-        input.addEventListener("input", () => {
-          console.log("Backup TEXTAREA save:", q.id, input.value);
-          queueSoftSave({ [q.id]: input.value }, wrapper);
-        });
-      } else if (input.type === "text") {
-        console.log("Auto-save activé pour TEXT:", q.id);
-        bindFieldAutosave(input, q.id);
-      } else {
-        input.querySelectorAll('input[type="radio"]').forEach(r => {
-          r.addEventListener("change", () => {
-            const val = input.querySelector('input[type="radio"]:checked')?.value || "";
-            queueSoftSave({ [q.id]: val }, wrapper);
-            flashSaved(wrapper);
-          });
-        });
-      }
-      addInlineSRToggle(wrapper, q);
-    
-      // 📓 Historique (compatible daily et practice)
-      if (q.history && q.history.length > 0) {
-        console.log(`📖 Affichage de l'historique pour "${q.label}" (${q.history.length} entrées)`);
-        const toggleBtn = document.createElement("button");
-        toggleBtn.type = "button";
-        toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
-        toggleBtn.textContent = "📓 Voir l’historique des réponses";
-
-        const historyBlock = document.createElement("div");
-        historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
-
-        // Graphe Likert + 2 stats compactes (sur 30 dernières)
-        renderLikertChart(historyBlock, q.history, normalize);
-
-        // --- Tri commun pour stats & liste : RÉCENT -> ANCIEN ---
-        const orderedForStats = orderForHistory(q.history);
-
-        // --- Stats compactes sur fenêtre récente ---
-        const LIMIT = 10;
-        const WINDOW = 30;
-        const badge = (title, value, tone="blue") => {
-          const div = document.createElement("div");
-          const tones = {
-            blue:"bg-blue-50 text-blue-700 border-blue-200",
-            green:"bg-green-50 text-green-700 border-green-200",
-            yellow:"bg-yellow-50 text-yellow-700 border-yellow-200",
-            red:"bg-red-50 text-red-900 border-red-200",
-            gray:"bg-gray-50 text-gray-700 border-gray-200",
-            purple:"bg-purple-50 text-purple-700 border-purple-200"
-          };
-          div.className = `px-2.5 py-1 rounded-full border text-xs font-medium ${tones[tone]||tones.gray}`;
-          div.innerHTML = `<span class="opacity-70">${title}:</span> <span class="font-semibold">${value}</span>`;
-          return div;
-        };
-        const POSITIVE = new Set(["oui","plutot oui"]);
-
-        // Fenêtre des N plus récents
-        const windowHist = orderedForStats.slice(0, WINDOW);
-
-        // Série courante (positifs consécutifs depuis le plus récent)
-        let currentStreak = 0;
-        for (const e of windowHist) {
-          if (POSITIVE.has(normalize(e.value))) currentStreak++;
-          else break;
-        }
-
-        // Réponse la plus fréquente (dans la fenêtre)
-        const counts = {};
-        const order = ["non","plutot non","moyen","plutot oui","oui"];
-        for (const e of windowHist) {
-          const v = normalize(e.value);
-          counts[v] = (counts[v] || 0) + 1;
-        }
-        let best = null, bestCount = -1;
-        for (const k of order) {
-          const c = counts[k] || 0;
-          if (c > bestCount) { best = k; bestCount = c; }
-        }
-        const pretty = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
-        const statsWrap = document.createElement("div");
-        statsWrap.className = "mb-3 flex flex-wrap gap-2 items-center";
-        statsWrap.appendChild(badge("Série actuelle (positifs)", currentStreak, currentStreak>0 ? "green":"gray"));
-        if (best) statsWrap.appendChild(badge("Réponse la plus fréquente", pretty[best] || best, "purple"));
-        historyBlock.appendChild(statsWrap);
-
-        // --- Liste : utilise le même ordre trié (récent -> ancien) ---
-        orderedForStats.forEach((entry, idx) => {
-          const keyPretty = prettyKeyWithDate(entry);
-          const val = entry.value;
-          const normalized = normalize(val);
-          const colorClass = colorMap[normalized] || "bg-gray-100 text-gray-700";
-
-          const entryDiv = document.createElement("div");
-          entryDiv.className = `mb-2 px-3 py-2 rounded ${colorClass}`;
-          if (idx >= LIMIT) entryDiv.classList.add("hidden", "extra-history");
-          entryDiv.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
-          historyBlock.appendChild(entryDiv);
-        });
-
-        if (orderedForStats.length > LIMIT) {
-          const moreBtn = document.createElement("button");
-          moreBtn.type = "button";
-          moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-          let expanded = false; const rest = orderedForStats.length - LIMIT;
-          const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
-          setLabel();
-          moreBtn.addEventListener("click", () => {
-            expanded = !expanded;
-            historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
-            setLabel();
-          });
-          historyBlock.appendChild(moreBtn);
-        }
-
-        toggleBtn.addEventListener("click", () => {
-          const wasHidden = historyBlock.classList.contains("hidden");
-          historyBlock.classList.toggle("hidden");
-          if (wasHidden) scrollToRight(historyBlock._likertScroller);
-        });
-
-        wrapper.appendChild(toggleBtn);
-        wrapper.appendChild(historyBlock);
-      }
-
-      container.appendChild(wrapper);
+      // ✅ on ne rend qu'une seule fois
       renderQuestion(q, container, normalize, colorMap);
     });
 
