@@ -245,6 +245,26 @@ async function initApp() {
     return () => on;
   }
 
+  function enableDragScroll(scrollEl, handleEl) {
+    if (!scrollEl || !handleEl) return;
+    let active = false, startY = 0, startTop = 0;
+    handleEl.addEventListener("pointerdown", (e) => {
+      active = true;
+      startY = e.clientY;
+      startTop = scrollEl.scrollTop;
+      handleEl.setPointerCapture(e.pointerId);
+      handleEl.classList.add("bg-gray-400");
+    });
+    handleEl.addEventListener("pointermove", (e) => {
+      if (!active) return;
+      const dy = e.clientY - startY;
+      scrollEl.scrollTop = startTop - dy * 1.2;
+    });
+    const stop = () => { active = false; handleEl.classList.remove("bg-gray-400"); };
+    handleEl.addEventListener("pointerup", stop);
+    handleEl.addEventListener("pointercancel", stop);
+  }
+
   function addInlineSRToggle(wrapper, q){
     window.__srToggles  = window.__srToggles || {};
     window.__srBaseline = window.__srBaseline || {};
@@ -263,7 +283,13 @@ async function initApp() {
       btn.textContent = on ? "ON" : "OFF";
       btn.className = "px-2 py-1 rounded border text-sm " + (on ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-700 border-gray-200");
     };
-    btn.onclick = ()=>{ window.__srToggles[q.id] = (window.__srToggles[q.id] === "on") ? "off" : "on"; paint(); };
+    btn.onclick = ()=>{
+      const now = (window.__srToggles[q.id] === "on") ? "off" : "on";
+      window.__srToggles[q.id] = now;
+      paint();
+      // auto-save doux immédiat
+      queueSoftSave({ ["__srToggle__" + q.id]: now });
+    };
     paint();
     row.appendChild(label);
     row.appendChild(btn);
@@ -697,6 +723,39 @@ async function initApp() {
     }
   }
 
+  // ----- AUTO-SAVE DOUX -----
+  const _softBuffer = {};
+  let _softTimer = null;
+  function queueSoftSave(patchObj) {
+    Object.assign(_softBuffer, patchObj || {});
+    if (_softTimer) clearTimeout(_softTimer);
+    _softTimer = setTimeout(async () => {
+      const keys = Object.keys(_softBuffer);
+      if (!keys.length) return;
+      const selected = document.getElementById("date-select")?.selectedOptions[0];
+      const mode = selected?.dataset.mode || "daily";
+      const body = { apiUrl, ..._softBuffer };
+      if (mode === "daily") {
+        body._mode = "daily";
+        body._date = selected.dataset.date;
+      } else {
+        body._mode = "practice";
+        body._category = selected.dataset.category;
+      }
+      try {
+        await fetch(WORKER_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+      } catch (e) {
+        console.warn("Auto-save échoué :", e);
+      } finally {
+        for (const k of keys) delete _softBuffer[k];
+      }
+    }, 600);
+  }
+
   // ====== GESTION CONSIGNES (UI) ======
   async function loadConsignes() {
     const list = await apiFetch("GET", `?mode=consignes`);
@@ -782,12 +841,13 @@ async function initApp() {
     if (catInput) catInput.value = c?.category || "";
 
     const freqBox = document.getElementById("freq-multi");
-    if (freqBox) buildFreqMulti(freqBox, c?.frequency || "");
+    const isPractice = /pratique\s*d[ée]lib[ée]r[ée]e/i.test(c?.frequency || "");
+    if (freqBox) buildFreqMulti(freqBox, isPractice ? "" : (c ? (c.frequency || "") : "Quotidien"));
 
-    const getSR = setupSRToggle(document.getElementById("sr-toggle"), c?.sr === "on");
+    const initialSrOn = c ? (c.sr === "on" || !!(c.scheduleInfo && c.scheduleInfo.sr && c.scheduleInfo.sr.on)) : true;
+    const getSR = setupSRToggle(document.getElementById("sr-toggle"), initialSrOn);
 
     // Mode (daily vs practice)
-    const isPractice = /pratique\s*d[ée]lib[ée]r[ée]e/i.test(c?.frequency || "");
     const modeDaily = form.querySelector('[name="modeConsigne"][value="daily"]');
     const modePractice = form.querySelector('[name="modeConsigne"][value="practice"]');
     const freqBlock = document.getElementById("freq-block");
@@ -804,6 +864,13 @@ async function initApp() {
       });
     }
 
+    // Focus + raccourci Ctrl/Cmd+Enter
+    form.querySelector('[name="label"]')?.focus();
+    form.addEventListener('keydown', (e)=>{ if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') form.requestSubmit(); });
+
+    // Drag-scroll
+    enableDragScroll(document.getElementById("consigne-body"), document.getElementById("drag-handle"));
+
     form.onsubmit = async (e) => {
       e.preventDefault();
       const daily = form.querySelector('[name="modeConsigne"][value="daily"]')?.checked !== false;
@@ -816,6 +883,15 @@ async function initApp() {
         frequency: daily ? (readFreqMulti(document.getElementById("freq-multi")) || "Quotidien") : "Pratique délibérée"
       };
       if (!payload.label) { showToast("❌ Label requis", "red"); return; }
+      // Spinner sur "Enregistrer"
+      const saveBtn = modal.querySelector('button[form="consigne-form"]');
+      const prev = saveBtn.innerHTML; saveBtn.disabled = true;
+      saveBtn.innerHTML = `
+        <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white inline" viewBox="0 0 24 24" fill="none">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0A12 12 0 000 12h4z"/>
+        </svg> Enregistrement…`;
+
       try {
         if (payload.id) {
           await updateConsigne(payload);
@@ -841,7 +917,7 @@ async function initApp() {
       } catch (err) {
         console.error(err);
         showToast("❌ Erreur consigne", "red");
-      }
+      } finally { saveBtn.disabled = false; saveBtn.innerHTML = prev; }
     };
 
     modal.classList.remove("hidden");
@@ -1224,6 +1300,17 @@ async function initApp() {
       }
 
       wrapper.appendChild(input);
+      // Auto-save doux
+      if (input.tagName === "SELECT" || input.tagName === "TEXTAREA" || input.type === "text") {
+        input.addEventListener("input", () => { queueSoftSave({ [q.id]: input.value }); });
+      } else {
+        input.querySelectorAll('input[type="radio"]').forEach(r => {
+          r.addEventListener("change", () => {
+            const val = input.querySelector('input[type="radio"]:checked')?.value || "";
+            queueSoftSave({ [q.id]: val });
+          });
+        });
+      }
       addInlineSRToggle(wrapper, q);
     
       // 📓 Historique (compatible daily et practice)

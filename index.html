@@ -22,8 +22,7 @@
         </select>
     </div>
 
-    <div class="mb-6 flex items-center justify-between">
-      <h2 class="text-xl font-semibold">⚙️ Gérer mes consignes</h2>
+    <div class="mb-6 flex items-center justify-end">
       <button id="new-consigne-btn" class="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
         ➕ Nouvelle consigne
       </button>
@@ -61,7 +60,9 @@
         </div>
 
         <!-- corps scrollable -->
-        <div class="px-5 py-4 space-y-4 overflow-y-auto flex-1" id="consigne-body">
+        <div class="px-5 pt-2 pb-4 space-y-4 overflow-y-auto flex-1" id="consigne-body">
+          <!-- grip pour drag-scroll -->
+          <div id="drag-handle" class="mx-auto mb-2 h-1.5 w-16 rounded bg-gray-300 cursor-grab active:cursor-grabbing"></div>
           <form id="consigne-form" class="space-y-4">
             <input type="hidden" name="id" />
 
