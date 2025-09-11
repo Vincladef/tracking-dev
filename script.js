@@ -171,6 +171,10 @@ function bindFieldAutosave(inputEl, qid) {
 }
 
 async function initApp() {
+  // Variables pour le pré-fetch
+  let _prefetch = null;
+  let _prefetchKey = "";
+
   // ✅ Mémoire des délais sélectionnés (clé -> valeur)
   appState.delayValues = {};
 
@@ -426,6 +430,15 @@ async function initApp() {
 
   await buildCombinedSelect();
 
+  // 🚀 Pré-fetch silencieux de la première date pour améliorer les performances
+  const firstDateOption = document.querySelector('#date-select option[data-mode="daily"]');
+  if (firstDateOption && firstDateOption.dataset.date) {
+    const firstDate = firstDateOption.dataset.date;
+    _prefetchKey = `date_${firstDate}`;
+    _prefetch = apiFetch("GET", `?date=${encodeURIComponent(firstDate)}`, { fresh: true });
+    console.log("🚀 Pré-fetch démarré pour la première date:", firstDate);
+  }
+
   // État initial
   handleSelectChange();
 
@@ -488,7 +501,7 @@ async function initApp() {
     btn.classList.add("opacity-60", "cursor-not-allowed");
     const btnPrev = btn.innerHTML;
     btn.innerHTML = `
-      <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <svg class="animate-spin -ml-1 mr-3 h-5 w-5 inline text-green-800" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
       </svg>
@@ -558,6 +571,34 @@ async function initApp() {
     const loader = document.getElementById("loader");
     if (loader) loader.classList.remove("hidden");
     console.log(`📡 Chargement des questions pour la date : ${dateISO}`);
+
+    // 🚀 Vérifier si on a déjà pré-chargé cette date
+    const cacheKey = `date_${dateISO}`;
+    if (_prefetch && _prefetchKey === cacheKey) {
+      console.log("⚡ Utilisation du pré-fetch pour", dateISO);
+      const cachedPromise = _prefetch;
+      _prefetch = null;
+      _prefetchKey = "";
+      
+      cachedPromise
+        .then(raw => {
+          const questions = toQuestions(raw);
+          if (!Array.isArray(questions)) {
+            console.error("Réponse inattendue (pas un tableau) :", raw);
+            showToast("❌ Format de données inattendu", "red");
+            document.getElementById("loader")?.classList.add("hidden");
+            return;
+          }
+          console.log(`✅ ${questions.length} question(s) chargée(s) (pré-fetch).`);
+          renderQuestions(questions);
+        })
+        .catch(err => {
+          document.getElementById("loader")?.classList.add("hidden");
+          console.error(err);
+          showToast("❌ Erreur de chargement du formulaire", "red");
+        });
+      return;
+    }
 
     apiFetch("GET", `?date=${encodeURIComponent(dateISO)}`, opts)
       .then(raw => {
@@ -1681,23 +1722,24 @@ async function initApp() {
       container.appendChild(det);
     }
 
-    // 4) Panneau « Questions masquées (SR) » — inchangé
+    // 4) Panneau « Questions masquées — répétition espacée »
     if (hiddenSR.length) {
-      const panel = document.createElement("div");
-      panel.className = "mt-6";
       const details = document.createElement("details");
-      details.className = "bg-gray-50 border border-gray-200 rounded-lg";
+      details.className = "mt-4";
       details.open = false;
+
       const sum = document.createElement("summary");
-      sum.className = "cursor-pointer select-none px-3 py-2 font-medium text-gray-700";
-      sum.textContent = `Questions masquées (SR) — ${hiddenSR.length}`;
+      // 👇 mêmes classes/tailles que le titre "Priorité basse", gris un ton plus clair
+      sum.className = "cursor-pointer select-none px-2 py-2 text-sm font-semibold text-gray-500 rounded hover:bg-gray-50";
+      sum.textContent = `Questions masquées — répétition espacée (${hiddenSR.length})`;
       details.appendChild(sum);
+
       const inner = document.createElement("div");
-      inner.className = "p-3";
+      inner.className = "mt-2";
       hiddenSR.forEach(q => {
         const wrap = document.createElement("div");
-        wrap.className = "mb-3 p-3 rounded border border-dashed border-gray-200 bg-white";
-        // on affiche au moins le label + infos de délai
+        // 👇 encadré unique (style "basse priorité") comme le reste
+        wrap.className = "mb-3 p-3 rounded-xl border border-gray-200 border-l-4 bg-gray-50";
         const t = document.createElement("div");
         t.className = "text-sm font-medium text-gray-800";
         t.textContent = q.label;
@@ -1705,9 +1747,9 @@ async function initApp() {
         addDelayUI(wrap, q);
         inner.appendChild(wrap);
       });
+
       details.appendChild(inner);
-      panel.appendChild(details);
-      container.appendChild(panel);
+      container.appendChild(details);
     }
 
     showFormUI();
