@@ -1048,8 +1048,9 @@ async function initApp() {
 
     form.onsubmit = async (e) => {
       e.preventDefault();
-      if (isSubmitting) return; // ⬅️ ignore les soumissions multiples
+      if (isSubmitting) return;
       isSubmitting = true;
+      
       const daily = form.querySelector('[name="modeConsigne"][value="daily"]')?.checked !== false;
       const payload = {
         id: form.elements.id.value || null,
@@ -1060,69 +1061,66 @@ async function initApp() {
         frequency: daily ? (readFreqMulti(document.getElementById("freq-multi")) || "Quotidien") : "pratique délibérée"
       };
       if (!payload.label) { showToast("❌ Label requis", "red"); isSubmitting = false; return; }
-      // Spinner sur "Enregistrer"
-      const saveBtn = modal.querySelector('button[form="consigne-form"]');
-      const prev = saveBtn.innerHTML; saveBtn.disabled = true;
-      saveBtn.innerHTML = `
-        <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white inline" viewBox="0 0 24 24" fill="none">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0A12 12 0 000 12h4z"/>
-        </svg> Enregistrement…`;
+
+      const submitBtn = document.querySelector('#consigne-modal button[type="submit"]');
+      const restore = () => { submitBtn.disabled = false; submitBtn.textContent = "Enregistrer"; isSubmitting = false; };
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Enregistrement…";
 
       try {
         if (payload.id) {
-          await updateConsigne(payload);          // appel principal
+          // UPDATE — appel principal court
+          await updateConsigne(payload);
           showToast("✅ Consigne mise à jour");
-          closeConsigneModal();                   // ⬅️ on ferme tout de suite
+          closeConsigneModal();              // ⬅️ ferme tout de suite
+          restore();
 
-          // tâches secondaires en arrière-plan (ne bloquent pas l'UX)
-          setTimeout(async () => {
+          // tâches secondaires en arrière-plan
+          queueMicrotask(async () => {
             try {
+              // SR toggle éventuel
               const tKey = "__srToggle__" + payload.id;
               const selected = document.getElementById("date-select")?.selectedOptions[0];
               const mode = selected?.dataset.mode || "daily";
               const body = { apiUrl, [tKey]: getSR() ? "on" : "off" };
               if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
               else { body._mode = "practice"; body._category = selected.dataset.category; }
-              await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
-            } catch (e) { console.warn("SR post-update ignoré:", e); }
+              fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) }).catch(()=>{});
+            } catch {}
             loadConsignes().catch(()=>{});
             refreshCurrentView(true);
-          }, 0);
+          });
+
         } else {
-          // Création rapide
+          // CREATE — appel principal court
           const { ok, newId } = await createConsigne(payload);
           if (!ok) throw new Error("Création échouée");
           showToast("✅ Consigne créée");
-          // Fermer le modal et relâcher le bouton IMMÉDIATEMENT
-          closeConsigneModal();
+          closeConsigneModal();              // ⬅️ ferme tout de suite
+          restore();
 
-          // ➜ tâches non bloquantes (on ne montre plus le spinner)
-          setTimeout(async () => {
+          // tâches secondaires en arrière-plan
+          queueMicrotask(async () => {
             try {
-              // SR auto-ON si laissé sur ON et si on a l'id créé
               if (getSR() && newId) {
-                const tKey = "__srToggle__" + newId;
+                // SR auto-ON si ID retourné
                 const selected = document.getElementById("date-select")?.selectedOptions[0];
                 const mode = selected?.dataset.mode || "daily";
-                const body = { apiUrl, [tKey]: "on" };
+                const body = { apiUrl, ["__srToggle__"+newId]: "on" };
                 if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
                 else { body._mode = "practice"; body._category = selected.dataset.category; }
-                await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
+                fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) }).catch(()=>{});
               }
-            } catch (e) { console.warn("SR auto-ON: ignoré", e); }
-            // Recharge liste + vue (fresh), sans spinner de modal
+            } catch {}
             loadConsignes().catch(()=>{});
             refreshCurrentView(true);
-          }, 0);
+          });
         }
       } catch (err) {
         console.error(err);
-        showToast("❌ Erreur consigne", "red");
-      } finally { 
-        saveBtn.disabled = false; 
-        saveBtn.innerHTML = prev; 
-        isSubmitting = false; // ⬅️ libère le verrou
+        showToast("❌ Échec de l'enregistrement", "red");
+        restore();
       }
     };
 
@@ -1385,38 +1383,25 @@ async function initApp() {
 
   // ✨ Fonction dédiée au rendu d'une seule question
   function renderQuestion(q, container, normalize, colorMap) {
-    // ==== Style selon priorité ====
     const p = Number(q?.priority ?? 2);
+    // Styles sobres et élégants
     const toneWrapper =
       p === 1 ? "bg-red-50 border border-red-300 border-l-8"
-    : p === 2 ? "bg-white border border-gray-200"
-              : "bg-gray-50 border border-gray-200";
-    const priText  = p === 1 ? "⚡️ Haute" : p === 2 ? "🎯 Moyenne" : "🌿 Basse";
-    const priBadge =
-      p === 1 ? "text-xs px-2 py-0.5 rounded bg-red-600 text-white"
-    : p === 2 ? "text-xs px-2 py-0.5 rounded bg-gray-700 text-white"
-              : "text-xs px-2 py-0.5 rounded bg-gray-300 text-gray-800";
+    : p === 2 ? "bg-white border border-gray-200 border-l-4"
+              : "bg-gray-50 border border-gray-200 border-l-4";
 
     const wrapper = document.createElement("div");
-    wrapper.className = `mb-8 p-4 rounded-lg shadow-sm ${toneWrapper}`;
+    wrapper.className = `mb-8 p-4 rounded-xl shadow-sm ${toneWrapper}`;
 
-    // header = titre + badge + actions
+    // header = titre + actions (plus de badge)
     const header = document.createElement("div");
     header.className = "flex items-start justify-between mb-2";
 
-    const titleBox = document.createElement("div");
-    titleBox.className = "flex items-center gap-2";
     const title = document.createElement("span");
     title.className = "text-lg font-semibold";
     title.textContent = q.label;
-    const badge = document.createElement("span");
-    badge.className = priBadge;
-    badge.textContent = priText;
-    titleBox.appendChild(title);
-    titleBox.appendChild(badge);
-    header.appendChild(titleBox);
+    header.appendChild(title);
 
-    // Actions inline (Modifier / Supprimer) — Archiver supprimé
     const actions = document.createElement("div");
     actions.className = "mt-1 flex items-center gap-3 text-sm";
 
