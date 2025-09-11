@@ -903,12 +903,10 @@ async function initApp() {
 
     const renderRow = (c) => {
       const p = Number(c?.priority ?? 2);
-      // contraste (haute très visible)
       const tone =
-        p === 1 ? "bg-red-50 border-red-500 border-l-8"
-      : p === 2 ? "bg-yellow-50 border-yellow-400 border-l-6"
-                : "bg-gray-50 border-gray-300 border-l-4";
-      const priLabel = p === 1 ? "⚡️ Haute" : (p === 2 ? "🎯 Moyenne" : "🌿 Faible");
+        p === 1 ? "bg-gray-200 border-gray-400 border-l-8"
+      : p === 2 ? "bg-gray-100 border-gray-300 border-l-6"
+                : "bg-gray-50  border-gray-200 border-l-4";
 
       const row = document.createElement("div");
       row.className = `px-4 py-3 mb-2 flex items-center gap-3 border rounded ${tone}`;
@@ -916,11 +914,11 @@ async function initApp() {
       const left = document.createElement("div");
       left.className = "flex-1 min-w-0";
       left.innerHTML = `
-        <div class="font-semibold ${p===1 ? 'text-red-800' : p===2 ? 'text-yellow-900' : 'text-gray-800'}">
+        <div class="font-semibold text-gray-900">
           ${c.label}
         </div>
         <div class="text-xs text-gray-600 mt-0.5">
-          <span class="inline-flex items-center px-1.5 py-0.5 border rounded mr-2 bg-white/70">${priLabel}</span>
+          Priorité : <b>${p===1?'haute':p===2?'moyenne':'basse'}</b> ·
           Cat: <b>${c.category || "-"}</b> · Type: <b>${c.type || "-"}</b> · Fréq: <b>${c.frequency || "-"}</b>
         </div>`;
       row.appendChild(left);
@@ -1070,47 +1068,87 @@ async function initApp() {
 
       try {
         if (payload.id) {
-          // UPDATE — appel principal court
-          await updateConsigne(payload);
-          showToast("✅ Consigne mise à jour");
-          closeConsigneModal();              // ⬅️ ferme tout de suite
-          restore();
+          // UPDATE — démarre l'appel et garde-fou 1.2s
+          const pUpdate = updateConsigne(payload);
+          const slowGuard = new Promise(r => setTimeout(()=>r("__timeout__"), 1200));
+          const winner = await Promise.race([pUpdate, slowGuard]);
 
-          // tâches secondaires en arrière-plan
-          queueMicrotask(async () => {
+          const after = () => {
             try {
-              // SR toggle éventuel
               const tKey = "__srToggle__" + payload.id;
               const selected = document.getElementById("date-select")?.selectedOptions[0];
               const mode = selected?.dataset.mode || "daily";
               const body = { apiUrl, [tKey]: getSR() ? "on" : "off" };
-              if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
-              else { body._mode = "practice"; body._category = selected.dataset.category; }
-              fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) }).catch(()=>{});
+              if (mode === "daily") { body._mode="daily"; body._date=selected.dataset.date; }
+              else { body._mode="practice"; body._category=selected.dataset.category; }
+              fetch(WORKER_URL, { method:"POST", body:JSON.stringify(body) });
             } catch {}
             loadConsignes().catch(()=>{});
             refreshCurrentView(true);
-          });
+          };
+
+          if (winner === "__timeout__") {
+            showToast("⏳ Enregistrement en arrière-plan…", "blue");
+            closeConsigneModal();
+            restore();
+            pUpdate.then(()=>{ showToast("✅ Consigne mise à jour"); after(); })
+                   .catch(()=> showToast("❌ Échec de mise à jour","red"));
+            return;
+          }
+
+          // Réponse rapide
+          showToast("✅ Consigne mise à jour");
+          closeConsigneModal();
+          restore();
+          queueMicrotask(after);
 
         } else {
-          // CREATE — appel principal court
-          const { ok, newId } = await createConsigne(payload);
+          // CREATE — démarre l'appel et garde-fou 1.2s
+          const pCreate = createConsigne(payload);
+          const slowGuard = new Promise(r => setTimeout(()=>r("__timeout__"), 1200));
+          const winner = await Promise.race([pCreate, slowGuard]);
+
+          if (winner === "__timeout__") {
+            // On ne bloque pas l'UX
+            showToast("⏳ Enregistrement en arrière-plan…", "blue");
+            closeConsigneModal();
+            restore();
+            // Quand ça finit, on fait le reste
+            pCreate.then(({ok,newId})=>{
+              if (ok) {
+                if (getSR() && newId) try {
+                  const selected = document.getElementById("date-select")?.selectedOptions[0];
+                  const mode = selected?.dataset.mode || "daily";
+                  const body = { apiUrl, ["__srToggle__"+newId]: "on" };
+                  if (mode === "daily") { body._mode="daily"; body._date=selected.dataset.date; }
+                  else { body._mode="practice"; body._category=selected.dataset.category; }
+                  fetch(WORKER_URL, { method:"POST", body:JSON.stringify(body) });
+                } catch {}
+                loadConsignes().catch(()=>{});
+                refreshCurrentView(true);
+                showToast("✅ Consigne créée");
+              } else {
+                showToast("❌ Échec de création", "red");
+              }
+            }).catch(()=> showToast("❌ Échec de création", "red"));
+            return; // on a déjà fermé
+          }
+
+          // Si on est ici, la création a répondu vite
+          const { ok, newId } = winner;
           if (!ok) throw new Error("Création échouée");
           showToast("✅ Consigne créée");
-          closeConsigneModal();              // ⬅️ ferme tout de suite
+          closeConsigneModal();
           restore();
-
-          // tâches secondaires en arrière-plan
           queueMicrotask(async () => {
             try {
               if (getSR() && newId) {
-                // SR auto-ON si ID retourné
                 const selected = document.getElementById("date-select")?.selectedOptions[0];
                 const mode = selected?.dataset.mode || "daily";
                 const body = { apiUrl, ["__srToggle__"+newId]: "on" };
-                if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
-                else { body._mode = "practice"; body._category = selected.dataset.category; }
-                fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) }).catch(()=>{});
+                if (mode === "daily") { body._mode="daily"; body._date=selected.dataset.date; }
+                else { body._mode="practice"; body._category=selected.dataset.category; }
+                fetch(WORKER_URL, { method:"POST", body:JSON.stringify(body) });
               }
             } catch {}
             loadConsignes().catch(()=>{});
@@ -1384,21 +1422,22 @@ async function initApp() {
   // ✨ Fonction dédiée au rendu d'une seule question
   function renderQuestion(q, container, normalize, colorMap) {
     const p = Number(q?.priority ?? 2);
-    // Styles sobres et élégants
+
+    // Nuances de gris (plus foncé pour priorité haute)
     const toneWrapper =
-      p === 1 ? "bg-red-50 border border-red-300 border-l-8"
-    : p === 2 ? "bg-white border border-gray-200 border-l-4"
-              : "bg-gray-50 border border-gray-200 border-l-4";
+      p === 1 ? "bg-gray-200 border border-gray-400 border-l-8"
+    : p === 2 ? "bg-gray-100 border border-gray-300 border-l-6"
+              : "bg-gray-50  border border-gray-200 border-l-4";
 
     const wrapper = document.createElement("div");
     wrapper.className = `mb-8 p-4 rounded-xl shadow-sm ${toneWrapper}`;
 
-    // header = titre + actions (plus de badge)
+    // Titre + actions (sans badge de priorité)
     const header = document.createElement("div");
     header.className = "flex items-start justify-between mb-2";
 
     const title = document.createElement("span");
-    title.className = "text-lg font-semibold";
+    title.className = "text-lg font-semibold text-gray-900";
     title.textContent = q.label;
     header.appendChild(title);
 
@@ -1407,13 +1446,12 @@ async function initApp() {
 
     const editBtn = document.createElement("button");
     editBtn.type = "button";
-    editBtn.className = "text-blue-600 hover:underline";
+    editBtn.className = "text-blue-700 hover:underline";
     editBtn.textContent = "Modifier";
     editBtn.onclick = () => openConsigneModal({
       id: q.id, label: q.label, category: q.category,
       type: q.type || "Oui/Non", priority: q.priority ?? 2,
-      frequency: q.frequency || "",
-      sr: (q.scheduleInfo?.sr?.on ? "on" : "off")
+      frequency: q.frequency || "", sr: (q.scheduleInfo?.sr?.on ? "on" : "off")
     });
     actions.appendChild(editBtn);
 
@@ -1424,14 +1462,8 @@ async function initApp() {
     delBtn.onclick = async () => {
       if (!confirm("Supprimer définitivement cette consigne ?")) return;
       const card = wrapper, parent = card.parentElement; card.remove();
-      try {
-        await deleteConsigne(q.id);
-        showToast("🗑️ Supprimée");
-        refreshCurrentView(true);
-      } catch (e) {
-        if (parent) parent.appendChild(card);
-        showToast("❌ Erreur de suppression", "red"); console.error(e);
-      }
+      try { await deleteConsigne(q.id); showToast("🗑️ Supprimée"); refreshCurrentView(true); }
+      catch (e) { if (parent) parent.appendChild(card); showToast("❌ Erreur de suppression","red"); console.error(e); }
     };
     actions.appendChild(delBtn);
 
