@@ -1071,16 +1071,24 @@ async function initApp() {
 
       try {
         if (payload.id) {
-          await updateConsigne(payload);
-          const tKey = "__srToggle__" + payload.id;
-          const body = { _mode: "daily", _date: new Date().toISOString().slice(0,10), apiUrl };
-          body[tKey] = getSR() ? "on" : "off";
-          await fetch(WORKER_URL, {
-            method: "POST",
-            body: JSON.stringify(body)
-          });
+          await updateConsigne(payload);          // appel principal
           showToast("✅ Consigne mise à jour");
-          flashSaved(document.querySelector("#consigne-modal .px-5.py-4.border-t"));
+          closeConsigneModal();                   // ⬅️ on ferme tout de suite
+
+          // tâches secondaires en arrière-plan (ne bloquent pas l'UX)
+          setTimeout(async () => {
+            try {
+              const tKey = "__srToggle__" + payload.id;
+              const selected = document.getElementById("date-select")?.selectedOptions[0];
+              const mode = selected?.dataset.mode || "daily";
+              const body = { apiUrl, [tKey]: getSR() ? "on" : "off" };
+              if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
+              else { body._mode = "practice"; body._category = selected.dataset.category; }
+              await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
+            } catch (e) { console.warn("SR post-update ignoré:", e); }
+            loadConsignes().catch(()=>{});
+            refreshCurrentView(true);
+          }, 0);
         } else {
           // Création rapide
           const { ok, newId } = await createConsigne(payload);
@@ -1377,42 +1385,52 @@ async function initApp() {
 
   // ✨ Fonction dédiée au rendu d'une seule question
   function renderQuestion(q, container, normalize, colorMap) {
-    const wrapper = document.createElement("div");
-    wrapper.className = "mb-8 p-4 rounded-lg shadow-sm";
+    // ==== Style selon priorité ====
+    const p = Number(q?.priority ?? 2);
+    const toneWrapper =
+      p === 1 ? "bg-red-50 border border-red-300 border-l-8"
+    : p === 2 ? "bg-white border border-gray-200"
+              : "bg-gray-50 border border-gray-200";
+    const priText  = p === 1 ? "⚡️ Haute" : p === 2 ? "🎯 Moyenne" : "🌿 Basse";
+    const priBadge =
+      p === 1 ? "text-xs px-2 py-0.5 rounded bg-red-600 text-white"
+    : p === 2 ? "text-xs px-2 py-0.5 rounded bg-gray-700 text-white"
+              : "text-xs px-2 py-0.5 rounded bg-gray-300 text-gray-800";
 
-    const label = document.createElement("label");
-    label.className = "block text-lg font-semibold mb-2";
-    label.textContent = q.label;
-    wrapper.appendChild(label);
-    // Actions inline (Modifier / Archiver / Supprimer)
+    const wrapper = document.createElement("div");
+    wrapper.className = `mb-8 p-4 rounded-lg shadow-sm ${toneWrapper}`;
+
+    // header = titre + badge + actions
+    const header = document.createElement("div");
+    header.className = "flex items-start justify-between mb-2";
+
+    const titleBox = document.createElement("div");
+    titleBox.className = "flex items-center gap-2";
+    const title = document.createElement("span");
+    title.className = "text-lg font-semibold";
+    title.textContent = q.label;
+    const badge = document.createElement("span");
+    badge.className = priBadge;
+    badge.textContent = priText;
+    titleBox.appendChild(title);
+    titleBox.appendChild(badge);
+    header.appendChild(titleBox);
+
+    // Actions inline (Modifier / Supprimer) — Archiver supprimé
     const actions = document.createElement("div");
     actions.className = "mt-1 flex items-center gap-3 text-sm";
+
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "text-blue-600 hover:underline";
     editBtn.textContent = "Modifier";
     editBtn.onclick = () => openConsigneModal({
-      id: q.id,
-      label: q.label,
-      category: q.category,
-      type: q.type || "Oui/Non",
-      priority: q.priority ?? 2,
+      id: q.id, label: q.label, category: q.category,
+      type: q.type || "Oui/Non", priority: q.priority ?? 2,
       frequency: q.frequency || "",
       sr: (q.scheduleInfo?.sr?.on ? "on" : "off")
     });
     actions.appendChild(editBtn);
-
-    const archived = (q.frequency || "").toLowerCase().includes("archiv");
-    const archBtn = document.createElement("button");
-    archBtn.type = "button";
-    archBtn.className = "text-gray-700 hover:underline";
-    archBtn.textContent = archived ? "Désarchiver" : "Archiver";
-    archBtn.onclick = async () => {
-      await updateConsigne({ id: q.id, frequency: archived ? "pratique délibérée" : "archivé" });
-      showToast(archived ? "✅ Désarchivée" : "✅ Archivée");
-      refreshCurrentView(true);
-    };
-    actions.appendChild(archBtn);
 
     const delBtn = document.createElement("button");
     delBtn.type = "button";
@@ -1420,26 +1438,20 @@ async function initApp() {
     delBtn.textContent = "Supprimer";
     delBtn.onclick = async () => {
       if (!confirm("Supprimer définitivement cette consigne ?")) return;
-
-      // ✅ UI optimiste : on retire la carte tout de suite
-      const card = wrapper;
-      const parent = card.parentElement;
-      card.remove();
-
+      const card = wrapper, parent = card.parentElement; card.remove();
       try {
         await deleteConsigne(q.id);
         showToast("🗑️ Supprimée");
-        // on peut recharger en arrière-plan pour être 100% synchro
         refreshCurrentView(true);
       } catch (e) {
-        // rollback en cas d'échec
         if (parent) parent.appendChild(card);
-        showToast("❌ Erreur de suppression", "red");
-        console.error(e);
+        showToast("❌ Erreur de suppression", "red"); console.error(e);
       }
     };
     actions.appendChild(delBtn);
-    wrapper.appendChild(actions);
+
+    header.appendChild(actions);
+    wrapper.appendChild(header);
 
     // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
     let referenceAnswer = "";
@@ -1604,195 +1616,90 @@ async function initApp() {
     container.innerHTML = "";
     console.log(`✍️ Rendu de ${questions.length} question(s)`);
 
-    const hiddenSR = []; // questions masquées par SR/delay
-    const normalize = (str) =>
-      (str || "")
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .replace(/[\u00A0\u202F\u200B]/g, " ")
-      .replace(/\s+/g, " ")
-      .toLowerCase()
-      .trim();
+    // 1) Séparer visibles / masquées (SR)
+    const hiddenSR = [];
+    const visibles  = [];
+    (questions || []).forEach(q => q.skipped ? hiddenSR.push(q) : visibles.push(q));
 
+    // 2) Grouper les visibles par priorité
+    const groups = { 1: [], 2: [], 3: [] }; // 1=haute,2=moyenne,3=basse
+    visibles.forEach(q => {
+      const p = Number(q?.priority ?? 2);
+      (p === 1 || p === 2 || p === 3 ? groups[p] : groups[2]).push(q);
+    });
+    const byLabel = (a,b)=> (a.label||"").localeCompare(b.label||"", "fr", {sensitivity:"base"});
+    groups[1].sort(byLabel); groups[2].sort(byLabel); groups[3].sort(byLabel);
+
+    // utilitaires existants (pour renderQuestion)
+    const normalize = (str) =>
+      (str || "").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[\u00A0\u202F\u200B]/g," ")
+        .replace(/\s+/g," ").toLowerCase().trim();
     const colorMap = {
-      "oui": "bg-green-100 text-green-800",
-      "plutot oui": "bg-green-50 text-green-700",
-      "moyen": "bg-yellow-100 text-yellow-800",
-      "plutot non": "bg-red-100 text-red-900",
-      "non": "bg-red-200 text-red-900",
-      "pas de reponse": "bg-gray-200 text-gray-700 italic"
+      "oui":"bg-green-100 text-green-800","plutot oui":"bg-green-50 text-green-700","moyen":"bg-yellow-100 text-yellow-800",
+      "plutot non":"bg-red-100 text-red-900","non":"bg-red-200 text-red-900","pas de reponse":"bg-gray-200 text-gray-700 italic"
     };
 
-    (questions || []).forEach(q => {
-      // Log détaillé pour chaque question
-      console.groupCollapsed(`[Question] Traitement de "${q.label}"`);
-      console.log("-> Type de question :", q.type);
-      console.log("-> Est-elle affichée ? :", !q.skipped);
-      if (q.skipped) {
-        console.log("-> Raison du masquage :", q.reason);
-      }
-      console.groupEnd();
-      
-      if (q.skipped) {
-        // on garde tout (history, scheduleInfo…) pour pouvoir afficher délai + historique
-        hiddenSR.push(q);
-        return;
-      }
-      
-      // ✅ on ne rend qu'une seule fois
-      renderQuestion(q, container, normalize, colorMap);
-    });
+    const addHeader = (txt, cls="") => {
+      const h = document.createElement("div");
+      h.className = `mb-2 mt-4 text-sm font-semibold ${cls}`;
+      h.textContent = txt;
+      container.appendChild(h);
+    };
 
-    // === Panneau "Questions masquées (SR)" ===
+    // 3) Afficher: HAUTE (contrastée) → MOYENNE (normale) → BASSE (repliées)
+    if (groups[1].length) {
+      addHeader(`Priorité haute (${groups[1].length})`, "text-red-700");
+      groups[1].forEach(q => renderQuestion(q, container, normalize, colorMap));
+    }
+    if (groups[2].length) {
+      addHeader(`Priorité moyenne (${groups[2].length})`, "text-gray-700");
+      groups[2].forEach(q => renderQuestion(q, container, normalize, colorMap));
+    }
+    if (groups[3].length) {
+      const det = document.createElement("details");
+      det.className = "mt-4";
+      det.open = false; // ⬅️ replié par défaut
+      const sum = document.createElement("summary");
+      sum.className = "cursor-pointer select-none px-2 py-2 text-sm font-semibold text-gray-700 rounded hover:bg-gray-50";
+      sum.textContent = `Priorité basse (${groups[3].length})`;
+      det.appendChild(sum);
+      const box = document.createElement("div");
+      box.className = "mt-2";
+      groups[3].forEach(q => renderQuestion(q, box, normalize, colorMap));
+      det.appendChild(box);
+      container.appendChild(det);
+    }
+
+    // 4) Panneau « Questions masquées (SR) » — inchangé
     if (hiddenSR.length) {
       const panel = document.createElement("div");
       panel.className = "mt-6";
-
       const details = document.createElement("details");
       details.className = "bg-gray-50 border border-gray-200 rounded-lg";
-      details.open = false; // toujours replié par défaut
-
-      const summary = document.createElement("summary");
-      summary.className = "cursor-pointer select-none px-4 py-2 font-medium text-gray-800 flex items-center justify-between";
-      summary.innerHTML = `
-        <span>🔕 ${hiddenSR.length} question(s) masquée(s) — répétition espacée</span>
-        <span class="text-sm text-gray-500">voir</span>
-      `;
-      details.appendChild(summary);
-
-      const list = document.createElement("div");
-      list.className = "px-4 pt-2 pb-3";
-
-      const normalize = (str) =>
-        (str || "")
-          .normalize("NFD").replace(/[̀-ͯ]/g, "")
-          .replace(/[\u00A0\u202F\u200B]/g, " ")
-          .replace(/\s+/g, " ")
-          .toLowerCase()
-          .trim();
-
-      hiddenSR.forEach(item => {
-        const row = document.createElement("div");
-        row.className = "mb-2 rounded bg-white border border-gray-200";
-
-        // en-tête de l'item
-        const head = document.createElement("div");
-        head.className = "px-3 py-2 flex items-center justify-between";
-        const title = document.createElement("div");
-        title.innerHTML = `<strong>${item.label}</strong>`;
-        head.appendChild(title);
-
-        // r: toggle sur tout le header
-        head.classList.add("cursor-pointer");
-        head.addEventListener("click", () => {
-          const wasHidden = content.classList.contains("hidden");
-          content.classList.toggle("hidden");
-          if (wasHidden) {
-            const sc = content.querySelector('[data-autoscroll="right"]');
-            scrollToRight(sc);
-          }
-        });
-
-        // infos "prochaine échéance"
-        const sub = document.createElement("div");
-        sub.className = "px-3 pb-2 text-sm text-gray-700 flex items-center gap-2";
-        const extras = [];
-        if (item.scheduleInfo?.nextDate) extras.push(`Prochaine : ${item.scheduleInfo.nextDate}`);
-        if (Number(item.scheduleInfo?.remaining) > 0) extras.push(`Restant : ${item.scheduleInfo.remaining} itér.`);
-        const tail = extras.length ? ` (${extras.join(" — ")})` : "";
-        const reason = item.reason || "Répétition espacée";
-        sub.innerHTML = `⏱️ ${reason.replace(/^✅\s*/, '')}${tail}`;
-
-        // contenu détaillé replié
-        const content = document.createElement("div");
-        content.className = "px-3 pb-3 hidden";
-
-        // 1) UI Délai (mêmes options que pour les visibles)
-        const delayWrap = document.createElement("div");
-        addInlineSRToggle(delayWrap, item);
-        content.appendChild(delayWrap);
-
-        // 2) Historique (même principe : bouton + bloc avec graphe + liste)
-        if (item.history && item.history.length > 0) {
-          const toggleBtn = document.createElement("button");
-          toggleBtn.type = "button";
-          toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
-          toggleBtn.textContent = "📓 Voir l’historique des réponses";
-
-          const historyBlock = document.createElement("div");
-          historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
-
-          // graphe likert
-          renderLikertChart(historyBlock, item.history, normalize);
-
-          // liste (RÉCENTS -> ANCIENS)
-          const ordered = orderForHistory(item.history);
-
-          const colorMap = {
-            "oui": "bg-green-100 text-green-800",
-            "plutot oui": "bg-green-50 text-green-700",
-            "moyen": "bg-yellow-100 text-yellow-800",
-            "plutot non": "bg-red-100 text-red-900",
-            "non": "bg-red-200 text-red-900",
-            "pas de reponse": "bg-gray-200 text-gray-700 italic"
-          };
-
-          const LIMIT = 10;
-          ordered.forEach((entry, idx) => {
-            const keyPretty = prettyKeyWithDate(entry);
-            const val = entry.value;
-            const normalized = normalize(val);
-            const div = document.createElement("div");
-            div.className = `mb-2 px-3 py-2 rounded ${colorMap[normalized] || "bg-gray-100 text-gray-700"}`;
-            if (idx >= LIMIT) div.classList.add("hidden", "extra-history");
-            div.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
-            historyBlock.appendChild(div);
-          });
-
-          if (ordered.length > LIMIT) {
-            const moreBtn = document.createElement("button");
-            moreBtn.type = "button";
-            moreBtn.className = "mt-2 text-xs text-blue-600 hover:underline";
-            let expanded = false; const rest = ordered.length - LIMIT;
-            const setLabel = () => moreBtn.textContent = expanded ? "Réduire" : `Afficher plus (${rest} de plus)`;
-            setLabel();
-            moreBtn.addEventListener("click", () => {
-              expanded = !expanded;
-              historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
-              setLabel();
-            });
-            historyBlock.appendChild(moreBtn);
-          }
-
-          toggleBtn.addEventListener("click", () => {
-            const wasHidden = historyBlock.classList.contains("hidden");
-            historyBlock.classList.toggle("hidden");
-            if (wasHidden) scrollToRight(historyBlock._likertScroller);
-          });
-
-          content.appendChild(toggleBtn);
-          content.appendChild(historyBlock);
-        }
-
-        // toggle du volet de l'item: supprimé (on clique sur l'entête)
-
-        row.appendChild(head);
-        row.appendChild(sub);
-        row.appendChild(content);
-        list.appendChild(row);
+      details.open = false;
+      const sum = document.createElement("summary");
+      sum.className = "cursor-pointer select-none px-3 py-2 font-medium text-gray-700";
+      sum.textContent = `Questions masquées (SR) — ${hiddenSR.length}`;
+      details.appendChild(sum);
+      const inner = document.createElement("div");
+      inner.className = "p-3";
+      hiddenSR.forEach(q => {
+        const wrap = document.createElement("div");
+        wrap.className = "mb-3 p-3 rounded border border-dashed border-gray-200 bg-white";
+        // on affiche au moins le label + infos de délai
+        const t = document.createElement("div");
+        t.className = "text-sm font-medium text-gray-800";
+        t.textContent = q.label;
+        wrap.appendChild(t);
+        addDelayUI(wrap, q);
+        inner.appendChild(wrap);
       });
-
-      const note = document.createElement("p");
-      note.className = "mt-2 text-xs text-gray-500";
-      note.textContent = "Ces items sont masqués automatiquement suite à vos réponses positives. Ils réapparaîtront à l’échéance.";
-      list.appendChild(note);
-
-      details.appendChild(list);
+      details.appendChild(inner);
       panel.appendChild(details);
       container.appendChild(panel);
     }
+
     showFormUI();
-    console.log("✅ Rendu des questions terminé.");
   }
 
   // Bouton nouvelle consigne
