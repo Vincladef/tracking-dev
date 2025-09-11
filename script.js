@@ -380,10 +380,15 @@ async function initApp() {
       const now = (appState.srToggles[q.id] === "on") ? "off" : "on";
       appState.srToggles[q.id] = now;
       paint();
-      // auto-save doux immédiat
       queueSoftSave({ ["__srToggle__" + q.id]: now }, row);
       flashSaved(row);
+      // 👇 appel optionnel (pour re-rendu immédiat)
+      if (typeof arguments.callee.onChange === "function") {
+        arguments.callee.onChange(now);
+      }
     };
+    // expose un setter juste après la définition de btn.onclick
+    btn.onclick.onChange = null; // valeur par défaut
     paint();
     row.appendChild(label);
     row.appendChild(btn);
@@ -1463,16 +1468,21 @@ async function initApp() {
 
     // 🔁 même encadré pour toutes les priorités (ancien "basse")
     const toneWrapper = "bg-gray-50 border border-gray-200 border-l-4";
-
     const wrapper = document.createElement("div");
     wrapper.className = `mb-8 p-4 rounded-xl shadow-sm ${toneWrapper}`;
+    
+    // Drag & drop
+    wrapper.draggable = true;
+    wrapper.dataset.qid = q.id;
+    wrapper.addEventListener("dragstart", () => wrapper.classList.add("opacity-60", "dragging"));
+    wrapper.addEventListener("dragend",   () => wrapper.classList.remove("opacity-60", "dragging"));
 
     // Titre + actions (sans badge de priorité)
     const header = document.createElement("div");
     header.className = "flex items-start justify-between mb-2";
 
     const title = document.createElement("span");
-    title.className = "text-lg font-semibold text-gray-900";
+    title.className = "text-lg font-semibold " + (p === 1 ? "text-gray-900" : "text-gray-800");
     title.textContent = q.label;
     header.appendChild(title);
 
@@ -1569,6 +1579,18 @@ async function initApp() {
       });
     }
     addInlineSRToggle(wrapper, q);
+    
+    // Callback pour re-render immédiat après toggle SR (visible -> masquée)
+    const lastChild = wrapper.lastElementChild; // la ligne SR ajoutée
+    const toggleBtn  = lastChild?.querySelector('button');
+    if (toggleBtn && toggleBtn.onclick) {
+      toggleBtn.onclick.onChange = (now) => {
+        if (now === "on") { // devient masquée
+          try { q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr:{ on:true } }); } catch {}
+          renderQuestions(appState.lastQuestions); // re-render immédiat
+        }
+      };
+    }
   
     // 📓 Historique (compatible daily et practice)
     if (q.history && q.history.length > 0) {
@@ -1668,6 +1690,10 @@ async function initApp() {
     container.innerHTML = "";
     console.log(`✍️ Rendu de ${questions.length} question(s)`);
 
+    // Mémoriser les questions par ID et conserver une copie pour re-render
+    appState.qById = new Map((questions||[]).map(q => [String(q.id), q]));
+    appState.lastQuestions = questions.slice();
+
     // 1) Séparer visibles / masquées (SR)
     const hiddenSR = [];
     const visibles  = [];
@@ -1699,13 +1725,19 @@ async function initApp() {
     };
 
     // 3) Afficher: HAUTE (contrastée) → MOYENNE (normale) → BASSE (repliées)
+    let sectionHighListEl, sectionMediumListEl, sectionLowListEl;
+    
     if (groups[1].length) {
       addHeader(`Priorité haute (${groups[1].length})`, "text-red-700");
-      groups[1].forEach(q => renderQuestion(q, container, normalize, colorMap));
+      sectionHighListEl = document.createElement("div");
+      groups[1].forEach(q => renderQuestion(q, sectionHighListEl, normalize, colorMap));
+      container.appendChild(sectionHighListEl);
     }
     if (groups[2].length) {
       addHeader(`Priorité moyenne (${groups[2].length})`, "text-gray-700");
-      groups[2].forEach(q => renderQuestion(q, container, normalize, colorMap));
+      sectionMediumListEl = document.createElement("div");
+      groups[2].forEach(q => renderQuestion(q, sectionMediumListEl, normalize, colorMap));
+      container.appendChild(sectionMediumListEl);
     }
     if (groups[3].length) {
       const det = document.createElement("details");
@@ -1715,12 +1747,17 @@ async function initApp() {
       sum.className = "cursor-pointer select-none px-2 py-2 text-sm font-semibold text-gray-700 rounded hover:bg-gray-50";
       sum.textContent = `Priorité basse (${groups[3].length})`;
       det.appendChild(sum);
-      const box = document.createElement("div");
-      box.className = "mt-2";
-      groups[3].forEach(q => renderQuestion(q, box, normalize, colorMap));
-      det.appendChild(box);
+      sectionLowListEl = document.createElement("div");
+      sectionLowListEl.className = "mt-2";
+      groups[3].forEach(q => renderQuestion(q, sectionLowListEl, normalize, colorMap));
+      det.appendChild(sectionLowListEl);
       container.appendChild(det);
     }
+
+    // Activer le drag & drop sur chaque section
+    if (sectionHighListEl) enableDnD(sectionHighListEl, 1);
+    if (sectionMediumListEl) enableDnD(sectionMediumListEl, 2);
+    if (sectionLowListEl) enableDnD(sectionLowListEl, 3);
 
     // 4) Panneau « Questions masquées — répétition espacée »
     if (hiddenSR.length) {
@@ -1729,23 +1766,89 @@ async function initApp() {
       details.open = false;
 
       const sum = document.createElement("summary");
-      // 👇 mêmes classes/tailles que le titre "Priorité basse", gris un ton plus clair
       sum.className = "cursor-pointer select-none px-2 py-2 text-sm font-semibold text-gray-500 rounded hover:bg-gray-50";
       sum.textContent = `Questions masquées — répétition espacée (${hiddenSR.length})`;
       details.appendChild(sum);
 
       const inner = document.createElement("div");
       inner.className = "mt-2";
+
       hiddenSR.forEach(q => {
-        const wrap = document.createElement("div");
-        // 👇 encadré unique (style "basse priorité") comme le reste
-        wrap.className = "mb-3 p-3 rounded-xl border border-gray-200 border-l-4 bg-gray-50";
-        const t = document.createElement("div");
-        t.className = "text-sm font-medium text-gray-800";
-        t.textContent = q.label;
-        wrap.appendChild(t);
-        addDelayUI(wrap, q);
-        inner.appendChild(wrap);
+        // carte standard (même encadré), avec label en gris foncé
+        const card = document.createElement("div");
+        card.className = "mb-3 p-4 rounded-xl border border-gray-200 border-l-4 bg-gray-50";
+        card.dataset.qid = q.id;
+
+        const head = document.createElement("div");
+        head.className = "flex items-start justify-between mb-2";
+        const title = document.createElement("span");
+        title.className = "text-lg font-semibold text-gray-800"; // foncé mais pas noir
+        title.textContent = q.label;
+        head.appendChild(title);
+
+        // actions: Historique / SR / Modifier / Supprimer
+        const actions = document.createElement("div");
+        actions.className = "mt-1 flex items-center gap-3 text-sm";
+
+        // Historique
+        const histBtn = document.createElement("button");
+        histBtn.type = "button";
+        histBtn.className = "text-gray-700 hover:underline";
+        histBtn.textContent = "Voir l'historique des réponses";
+        histBtn.onclick = () => {
+          let panel = card.querySelector(".__hist__");
+          if (panel) { panel.remove(); return; }
+          panel = document.createElement("div");
+          panel.className = "__hist__ mt-2";
+          renderLikertChart(panel, q.history, (s)=>s); // ton normalizer existe déjà plus haut
+          card.appendChild(panel);
+        };
+        actions.appendChild(histBtn);
+
+        // SR ON/OFF (et bascule live -> visible)
+        const srRow = document.createElement("div");
+        addInlineSRToggle(srRow, q); // ajoute le bouton
+        const srBtn = srRow.querySelector("button");
+        if (srBtn && srBtn.onclick) {
+          srBtn.onclick.onChange = (now) => {
+            if (now === "off") {          // devient visible
+              try { q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr:{ on:false } }); } catch {}
+              renderQuestions(appState.lastQuestions);
+            }
+          };
+        }
+        // on ne garde que le bouton, pas le label
+        actions.appendChild(srRow.querySelector("button"));
+
+        // Modifier
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.className = "text-blue-600 hover:underline";
+        edit.textContent = "Modifier";
+        edit.onclick = () => openConsigneModal({
+          id:q.id, label:q.label, category:q.category, type:q.type||"Oui/Non",
+          priority:q.priority??2, frequency:q.frequency||"", sr:(q.scheduleInfo?.sr?.on?"on":"off")
+        });
+        actions.appendChild(edit);
+
+        // Supprimer
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "text-red-600 hover:underline";
+        del.textContent = "Supprimer";
+        del.onclick = async () => {
+          if (!confirm("Supprimer définitivement cette consigne ?")) return;
+          const parent = card.parentElement; card.remove();
+          try { await deleteConsigne(q.id); showToast("🗑️ Supprimée"); refreshCurrentView(true); }
+          catch (e) { if (parent) parent.appendChild(card); showToast("❌ Erreur", "red"); }
+        };
+        actions.appendChild(del);
+
+        head.appendChild(actions);
+        card.appendChild(head);
+
+        // (pas de bouton "Délai" ici)
+        inner.appendChild(card);
       });
 
       details.appendChild(inner);
@@ -1753,6 +1856,54 @@ async function initApp() {
     }
 
     showFormUI();
+  }
+
+  // Drag & Drop helpers
+  function getDragAfterElement(container, mouseY) {
+    const els = [...container.querySelectorAll('[data-qid]:not(.dragging)')];
+    return els.reduce((closest, el) => {
+      const box = el.getBoundingClientRect();
+      const offset = mouseY - (box.top + box.height / 2);
+      if (offset < 0 && offset > closest.offset) return { offset, element: el };
+      return closest;
+    }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
+  }
+
+  function enableDnD(listEl, targetPriority) {
+    listEl.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      const after = getDragAfterElement(listEl, e.clientY);
+      const dragging = document.querySelector(".dragging");
+      if (!dragging) return;
+      if (after == null) listEl.appendChild(dragging);
+      else listEl.insertBefore(dragging, after);
+    });
+
+    listEl.addEventListener("drop", async (e) => {
+      const dragging = document.querySelector(".dragging");
+      if (!dragging) return;
+      const id = dragging.dataset.qid;
+      const q  = (appState.qById && appState.qById.get(id)) || null;
+      if (!q) { refreshCurrentView(true); return; }
+
+      // si on change de section → on persiste la nouvelle priorité
+      const newPri = targetPriority;
+      if ((q.priority || 2) !== newPri) {
+        try {
+          await updateConsigne({
+            id: q.id, label: q.label, category: q.category,
+            type: q.type, frequency: q.frequency, priority: newPri
+          });
+          q.priority = newPri; // optimiste
+        } catch (err) {
+          showToast("❌ Erreur mise à jour priorité", "red");
+          refreshCurrentView(true);
+          return;
+        }
+      }
+      // ordre intra-section = visuel (non persisté tant qu'on n'ajoute pas un champ "order" côté Sheet)
+      flashSaved(listEl);
+    });
   }
 
   // Bouton nouvelle consigne
