@@ -1489,20 +1489,6 @@ async function initApp() {
     const actions = document.createElement("div");
     actions.className = "mt-1 flex items-center gap-3 text-sm";
 
-    // Historique à la demande
-    const histBtn = document.createElement("button");
-    histBtn.type = "button";
-    histBtn.className = "text-gray-700 hover:underline";
-    histBtn.textContent = "Voir l'historique des réponses";
-    histBtn.onclick = () => {
-      let panel = wrapper.querySelector(".__hist__");
-      if (panel) { panel.remove(); return; } // toggle
-      panel = document.createElement("div");
-      panel.className = "__hist__ mt-2";
-      renderLikertChart(panel, q.history, (s)=>s);
-      wrapper.appendChild(panel);
-    };
-    actions.appendChild(histBtn);
 
     const editBtn = document.createElement("button");
     editBtn.type = "button";
@@ -1527,7 +1513,11 @@ async function initApp() {
     down.className = "text-gray-500 hover:underline";
     down.textContent = "↓";
     down.title = "Descendre";
-    down.onclick = () => { const next = wrapper.nextElementSibling; if (next) wrapper.parentElement.insertBefore(next, wrapper.nextElementSibling?.nextElementSibling || null); };
+    // ↓ Descendre (remplacement du onClick)
+    down.onclick = () => {
+      const next = wrapper.nextElementSibling;
+      if (next) next.after(wrapper); // déplace la carte courante APRÈS son voisin du dessous
+    };
 
     actions.appendChild(up);
     actions.appendChild(down);
@@ -1624,7 +1614,12 @@ async function initApp() {
       };
     }
   
-    // Historique supprimé - maintenant à la demande via le bouton dans les actions
+    // Historique en bas de la carte
+    if (q.history && q.history.length > 0) {
+      const historyContainer = document.createElement('div');
+      renderHistory(q.history, historyContainer, normalize, colorMap);
+      wrapper.appendChild(historyContainer);
+    }
 
     container.appendChild(wrapper);
   }
@@ -1642,17 +1637,13 @@ async function initApp() {
     const historyBlock = document.createElement("div");
     historyBlock.className = "mt-3 p-3 rounded bg-gray-50 border text-sm text-gray-700 hidden";
 
-    // === Graphe Likert ===
-    const chartWrap = document.createElement("div");
-    renderLikertChart(chartWrap, history, normalize); // utilisera le scroller interne si assez de points
-    historyBlock.appendChild(chartWrap);
+    // — Rendu différé du graphe —
+    let chartBuilt = false;
+    let chartWrap = null;
 
-    // === Stats rapides (facultatif mais utile) ===
+    // === Stats rapides (pré-calcul léger) ===
     const counts = { "oui":0, "plutot oui":0, "moyen":0, "plutot non":0, "non":0 };
-    history.forEach(e => {
-      const n = normalize(e.value);
-      if (counts[n] != null) counts[n] += 1;
-    });
+    history.forEach(e => { const n = normalize(e.value); if (counts[n] != null) counts[n] += 1; });
     const stats = document.createElement("div");
     stats.className = "mt-2 text-xs text-gray-600";
     stats.innerHTML = [
@@ -1662,11 +1653,11 @@ async function initApp() {
       `Plutôt non: ${counts["plutot non"]}`,
       `Non: ${counts["non"]}`
     ].join(" · ");
-    historyBlock.appendChild(stats);
 
     // === Liste (RÉCENTS -> ANCIENS) ===
     const ordered = orderForHistory(history);
     const LIMIT = 10;
+    const listFrag = document.createDocumentFragment();
     ordered.forEach((entry, idx) => {
       const keyPretty = prettyKeyWithDate(entry);
       const val = entry.value;
@@ -1675,7 +1666,7 @@ async function initApp() {
       line.className = `mb-2 px-3 py-2 rounded ${colorMap[n] || "bg-gray-100 text-gray-700"}`;
       if (idx >= LIMIT) line.classList.add("hidden", "extra-history");
       line.innerHTML = `<strong>${keyPretty}</strong> – ${val}`;
-      historyBlock.appendChild(line);
+      listFrag.appendChild(line);
     });
 
     if (ordered.length > LIMIT) {
@@ -1691,17 +1682,26 @@ async function initApp() {
         historyBlock.querySelectorAll(".extra-history").forEach(el => el.classList.toggle("hidden", !expanded));
         setLabel();
       });
-      historyBlock.appendChild(moreBtn);
+      listFrag.appendChild(moreBtn);
     }
 
     // Toggle ouverture/fermeture
     toggleBtn.addEventListener("click", () => {
       const wasHidden = historyBlock.classList.contains("hidden");
       historyBlock.classList.toggle("hidden");
-      if (wasHidden) {
-        // auto-scroll vers la droite du graphe (si overflow)
-        const sc = chartWrap._likertScroller;
-        if (sc) requestAnimationFrame(() => { sc.scrollLeft = sc.scrollWidth; });
+
+      if (!chartBuilt) {
+        chartWrap = document.createElement("div");
+        renderLikertChart(chartWrap, history, normalize); // construit le graphe au premier clic
+        // si overflow horizontal, le scroller est attaché par renderLikertChart sur chartWrap._likertScroller
+        historyBlock.prepend(chartWrap);
+        historyBlock.appendChild(stats);
+        historyBlock.appendChild(listFrag);
+        chartBuilt = true;
+      }
+
+      if (wasHidden && chartWrap && chartWrap._likertScroller) {
+        requestAnimationFrame(() => { chartWrap._likertScroller.scrollLeft = chartWrap._likertScroller.scrollWidth; });
       }
     });
 
@@ -1751,35 +1751,38 @@ async function initApp() {
     };
 
     // 3) Afficher: HAUTE (contrastée) → MOYENNE (normale) → BASSE (repliées)
-    const mkList = (cls="space-y-4") => { const d = document.createElement("div"); d.className = cls; return d; };
+    let sectionHighListEl, sectionMediumListEl, sectionLowListEl;
 
     if (groups[1].length) {
       addHeader(`Priorité haute (${groups[1].length})`, "text-red-700");
-      const listHigh = mkList(); listHigh.dataset.section = "1"; container.appendChild(listHigh);
-      groups[1].forEach(q => renderQuestion(q, listHigh, normalize, colorMap));
-      enableDnD(listHigh, 1);
+      sectionHighListEl = document.createElement("div");
+      groups[1].forEach(q => renderQuestion(q, sectionHighListEl, normalize, colorMap));
+      container.appendChild(sectionHighListEl);
     }
-
     if (groups[2].length) {
       addHeader(`Priorité moyenne (${groups[2].length})`, "text-gray-700");
-      const listMed = mkList(); listMed.dataset.section = "2"; container.appendChild(listMed);
-      groups[2].forEach(q => renderQuestion(q, listMed, normalize, colorMap));
-      enableDnD(listMed, 2);
+      sectionMediumListEl = document.createElement("div");
+      groups[2].forEach(q => renderQuestion(q, sectionMediumListEl, normalize, colorMap));
+      container.appendChild(sectionMediumListEl);
     }
-
     if (groups[3].length) {
-      const det = document.createElement("details"); det.className = "mt-4"; det.open = false;
+      const det = document.createElement("details");
+      det.className = "mt-4"; det.open = false;
       const sum = document.createElement("summary");
       sum.className = "cursor-pointer select-none px-2 py-2 text-sm font-semibold text-gray-700 rounded hover:bg-gray-50";
       sum.textContent = `Priorité basse (${groups[3].length})`;
       det.appendChild(sum);
-
-      const box = mkList("mt-2 space-y-4"); box.dataset.section = "3"; det.appendChild(box);
-      groups[3].forEach(q => renderQuestion(q, box, normalize, colorMap));
+      sectionLowListEl = document.createElement("div");
+      sectionLowListEl.className = "mt-2";
+      groups[3].forEach(q => renderQuestion(q, sectionLowListEl, normalize, colorMap));
+      det.appendChild(sectionLowListEl);
       container.appendChild(det);
-
-      enableDnD(box, 3);
     }
+
+    // Activer DnD
+    if (sectionHighListEl)   enableDnD(sectionHighListEl,   1);
+    if (sectionMediumListEl) enableDnD(sectionMediumListEl, 2);
+    if (sectionLowListEl)    enableDnD(sectionLowListEl,    3);
 
     // 4) Panneau « Questions masquées — répétition espacée »
     if (hiddenSR.length) {
