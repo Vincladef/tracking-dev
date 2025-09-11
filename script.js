@@ -892,45 +892,39 @@ async function initApp() {
     if (!wrap) return;
     wrap.innerHTML = "";
 
-    // 1) Grouper par priorité (1=Haute, 2=Moyenne, 3=Faible)
+    // Grouper 1=Haute, 2=Moyenne, 3=Faible
     const groups = { 1: [], 2: [], 3: [] };
     (Array.isArray(consignes) ? consignes : []).forEach(c => {
       const p = Number(c?.priority ?? 2);
-      if (p === 1 || p === 2 || p === 3) groups[p].push(c); else groups[2].push(c);
+      (p === 1 || p === 2 || p === 3 ? groups[p] : groups[2]).push(c);
     });
-
-    // Tri alphabétique par label dans chaque groupe
-    const byLabel = (a,b) => (a.label || "").localeCompare(b.label || "", "fr", { sensitivity:"base" });
+    const byLabel = (a,b) => (a.label||"").localeCompare(b.label||"", "fr", {sensitivity:"base"});
     groups[1].sort(byLabel); groups[2].sort(byLabel); groups[3].sort(byLabel);
 
-    // Petite fabrique de lignes uniformes
     const renderRow = (c) => {
       const p = Number(c?.priority ?? 2);
-      const tone = p === 1
-        ? "bg-red-50 border-red-300"
-        : p === 2
-          ? "bg-yellow-50 border-yellow-300"
-          : "bg-gray-50 border-gray-300";
-
+      // contraste (haute très visible)
+      const tone =
+        p === 1 ? "bg-red-50 border-red-500 border-l-8"
+      : p === 2 ? "bg-yellow-50 border-yellow-400 border-l-6"
+                : "bg-gray-50 border-gray-300 border-l-4";
       const priLabel = p === 1 ? "⚡️ Haute" : (p === 2 ? "🎯 Moyenne" : "🌿 Faible");
 
       const row = document.createElement("div");
-      row.className = `px-4 py-3 mb-2 flex items-center gap-3 border border-l-4 rounded ${tone}`;
+      row.className = `px-4 py-3 mb-2 flex items-center gap-3 border rounded ${tone}`;
 
-      // Bloc gauche (titre + meta)
       const left = document.createElement("div");
       left.className = "flex-1 min-w-0";
       left.innerHTML = `
-        <div class="font-medium">${c.label}</div>
+        <div class="font-semibold ${p===1 ? 'text-red-800' : p===2 ? 'text-yellow-900' : 'text-gray-800'}">
+          ${c.label}
+        </div>
         <div class="text-xs text-gray-600 mt-0.5">
-          <span class="inline-flex items-center px-1.5 py-0.5 border rounded mr-2">${priLabel}</span>
-          Cat: <b>${c.category || "-"}</b>
-          · Type: <b>${c.type || "-"}</b>
-          · Fréq: <b>${c.frequency || "-"}</b>
+          <span class="inline-flex items-center px-1.5 py-0.5 border rounded mr-2 bg-white/70">${priLabel}</span>
+          Cat: <b>${c.category || "-"}</b> · Type: <b>${c.type || "-"}</b> · Fréq: <b>${c.frequency || "-"}</b>
         </div>`;
       row.appendChild(left);
 
-      // Boutons
       const btns = document.createElement("div");
       btns.className = "flex items-center gap-2";
 
@@ -950,12 +944,11 @@ async function initApp() {
         try {
           await deleteConsigne(c.id);
           showToast("🗑️ Supprimée");
-          await loadConsignes();       // recharge la liste
-          refreshCurrentView(true);    // et la vue courante (fresh)
+          await loadConsignes();      // fresh
+          refreshCurrentView(true);   // fresh
         } catch (e) {
           if (parent) parent.appendChild(rowEl);
-          showToast("❌ Erreur de suppression", "red");
-          console.error(e);
+          showToast("❌ Erreur de suppression", "red"); console.error(e);
         }
       };
       btns.appendChild(del);
@@ -964,7 +957,6 @@ async function initApp() {
       return row;
     };
 
-    // Titres de section
     const addHeader = (title, count, cls="") => {
       const h = document.createElement("div");
       h.className = `px-2 py-2 text-sm font-semibold ${cls}`;
@@ -972,29 +964,26 @@ async function initApp() {
       wrap.appendChild(h);
     };
 
-    // 2) Affichage : Haute (visible & accentuée) → Moyenne → Faible (repliées)
     if (groups[1].length) {
       addHeader("Priorité haute", groups[1].length, "text-red-700");
       groups[1].forEach(c => wrap.appendChild(renderRow(c)));
     }
-
     if (groups[2].length) {
       addHeader("Priorité moyenne", groups[2].length, "text-yellow-700 mt-3");
       groups[2].forEach(c => wrap.appendChild(renderRow(c)));
     }
-
     if (groups[3].length) {
       const det = document.createElement("details");
       det.className = "mt-3";
+      // fermé par défaut
+      det.open = false;
       const sum = document.createElement("summary");
       sum.className = "cursor-pointer select-none px-2 py-2 text-sm font-semibold text-gray-700 rounded hover:bg-gray-50";
       sum.textContent = `Priorité faible (${groups[3].length})`;
       det.appendChild(sum);
-
       const box = document.createElement("div");
       box.className = "mt-2";
       groups[3].forEach(c => box.appendChild(renderRow(c)));
-
       det.appendChild(box);
       wrap.appendChild(det);
     }
@@ -1093,48 +1082,32 @@ async function initApp() {
           showToast("✅ Consigne mise à jour");
           flashSaved(document.querySelector("#consigne-modal .px-5.py-4.border-t"));
         } else {
-          await fetch(WORKER_URL, {
-            method: "POST",
-            body: JSON.stringify({
-            _action: "consigne_create",
-            category: payload.category,
-            type: payload.type,
-            frequency: payload.frequency,
-            label: payload.label,
-            priority: payload.priority,
-            apiUrl
-          })});
+          // Création rapide
+          const { ok, newId } = await createConsigne(payload);
+          if (!ok) throw new Error("Création échouée");
           showToast("✅ Consigne créée");
-          flashSaved(document.querySelector("#consigne-modal .px-5.py-4.border-t"));
+          // Fermer le modal et relâcher le bouton IMMÉDIATEMENT
+          closeConsigneModal();
 
-          // ➕ Si l'utilisateur a laissé SR sur ON dans le modal → applique au backend
-          try {
-            if (getSR()) {
-              const list = await apiFetch("GET", `?mode=consignes`);
-              const arr = Array.isArray(list) ? list : [];
-              // Heuristique: même label+cat+type+priority → prend la plus récente (ou la première si la liste est déjà triée)
-              const match = arr.find(x =>
-                x.label === payload.label &&
-                (x.category || "") === (payload.category || "") &&
-                (x.type || "") === (payload.type || "") &&
-                (x.priority ?? 2) === (payload.priority ?? 2)
-              );
-              if (match?.id) {
-                const tKey = "__srToggle__" + match.id;
+          // ➜ tâches non bloquantes (on ne montre plus le spinner)
+          setTimeout(async () => {
+            try {
+              // SR auto-ON si laissé sur ON et si on a l'id créé
+              if (getSR() && newId) {
+                const tKey = "__srToggle__" + newId;
                 const selected = document.getElementById("date-select")?.selectedOptions[0];
                 const mode = selected?.dataset.mode || "daily";
                 const body = { apiUrl, [tKey]: "on" };
                 if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
                 else { body._mode = "practice"; body._category = selected.dataset.category; }
-                await fetch(WORKER_URL, { method:"POST", body: JSON.stringify(body) });
+                await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
               }
-            }
-          } catch (e) {
-            console.warn("SR auto-ON après création : impossible d'appliquer maintenant", e);
-          }
+            } catch (e) { console.warn("SR auto-ON: ignoré", e); }
+            // Recharge liste + vue (fresh), sans spinner de modal
+            loadConsignes().catch(()=>{});
+            refreshCurrentView(true);
+          }, 0);
         }
-        closeConsigneModal();
-        refreshCurrentView(true);
       } catch (err) {
         console.error(err);
         showToast("❌ Erreur consigne", "red");
@@ -1173,10 +1146,18 @@ async function initApp() {
       priority: payload.priority,
       apiUrl
     };
-    await fetch(WORKER_URL, {
-      method: "POST",
-      body: JSON.stringify(body)
-    });
+    const res = await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
+    const ct = res.headers.get("content-type") || "";
+    let newId = null;
+    if (ct.includes("application/json")) {
+      try {
+        const j = await res.json();
+        newId = j?.id || j?.newId || j?.consigne?.id || null;
+      } catch {}
+    } else {
+      await res.text().catch(()=>{});
+    }
+    return { ok: res.ok, newId };
   }
 
   async function updateConsigne(payload) {
