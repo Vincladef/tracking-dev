@@ -1489,16 +1489,48 @@ async function initApp() {
     const actions = document.createElement("div");
     actions.className = "mt-1 flex items-center gap-3 text-sm";
 
+    // Historique à la demande
+    const histBtn = document.createElement("button");
+    histBtn.type = "button";
+    histBtn.className = "text-gray-700 hover:underline";
+    histBtn.textContent = "Voir l'historique des réponses";
+    histBtn.onclick = () => {
+      let panel = wrapper.querySelector(".__hist__");
+      if (panel) { panel.remove(); return; } // toggle
+      panel = document.createElement("div");
+      panel.className = "__hist__ mt-2";
+      renderLikertChart(panel, q.history, (s)=>s);
+      wrapper.appendChild(panel);
+    };
+    actions.appendChild(histBtn);
+
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "text-blue-700 hover:underline";
     editBtn.textContent = "Modifier";
     editBtn.onclick = () => openConsigneModal({
-      id: q.id, label: q.label, category: q.category,
-      type: q.type || "Oui/Non", priority: q.priority ?? 2,
-      frequency: q.frequency || "", sr: (q.scheduleInfo?.sr?.on ? "on" : "off")
+      id: q.id, label: q.label, category: q.category, type: q.type || "Oui/Non",
+      priority: q.priority ?? 2, frequency: q.frequency || "", sr: (q.scheduleInfo?.sr?.on ? "on" : "off")
     });
     actions.appendChild(editBtn);
+
+    // Flèches up/down pour réordonnancement rapide
+    const up = document.createElement("button");
+    up.type = "button";
+    up.className = "text-gray-500 hover:underline";
+    up.textContent = "↑";
+    up.title = "Monter";
+    up.onclick = () => { const prev = wrapper.previousElementSibling; if (prev) wrapper.parentElement.insertBefore(wrapper, prev); };
+
+    const down = document.createElement("button");
+    down.type = "button";
+    down.className = "text-gray-500 hover:underline";
+    down.textContent = "↓";
+    down.title = "Descendre";
+    down.onclick = () => { const next = wrapper.nextElementSibling; if (next) wrapper.parentElement.insertBefore(next, wrapper.nextElementSibling?.nextElementSibling || null); };
+
+    actions.appendChild(up);
+    actions.appendChild(down);
 
     const delBtn = document.createElement("button");
     delBtn.type = "button";
@@ -1592,13 +1624,7 @@ async function initApp() {
       };
     }
   
-    // 📓 Historique (compatible daily et practice)
-    if (q.history && q.history.length > 0) {
-      console.log(`📖 Affichage de l'historique pour "${q.label}" (${q.history.length} entrées)`);
-      const historyContainer = document.createElement('div');
-      renderHistory(q.history, historyContainer, normalize, colorMap);
-      wrapper.appendChild(historyContainer);
-    }
+    // Historique supprimé - maintenant à la demande via le bouton dans les actions
 
     container.appendChild(wrapper);
   }
@@ -1725,39 +1751,35 @@ async function initApp() {
     };
 
     // 3) Afficher: HAUTE (contrastée) → MOYENNE (normale) → BASSE (repliées)
-    let sectionHighListEl, sectionMediumListEl, sectionLowListEl;
-    
+    const mkList = (cls="space-y-4") => { const d = document.createElement("div"); d.className = cls; return d; };
+
     if (groups[1].length) {
       addHeader(`Priorité haute (${groups[1].length})`, "text-red-700");
-      sectionHighListEl = document.createElement("div");
-      groups[1].forEach(q => renderQuestion(q, sectionHighListEl, normalize, colorMap));
-      container.appendChild(sectionHighListEl);
+      const listHigh = mkList(); listHigh.dataset.section = "1"; container.appendChild(listHigh);
+      groups[1].forEach(q => renderQuestion(q, listHigh, normalize, colorMap));
+      enableDnD(listHigh, 1);
     }
+
     if (groups[2].length) {
       addHeader(`Priorité moyenne (${groups[2].length})`, "text-gray-700");
-      sectionMediumListEl = document.createElement("div");
-      groups[2].forEach(q => renderQuestion(q, sectionMediumListEl, normalize, colorMap));
-      container.appendChild(sectionMediumListEl);
+      const listMed = mkList(); listMed.dataset.section = "2"; container.appendChild(listMed);
+      groups[2].forEach(q => renderQuestion(q, listMed, normalize, colorMap));
+      enableDnD(listMed, 2);
     }
+
     if (groups[3].length) {
-      const det = document.createElement("details");
-      det.className = "mt-4";
-      det.open = false; // ⬅️ replié par défaut
+      const det = document.createElement("details"); det.className = "mt-4"; det.open = false;
       const sum = document.createElement("summary");
       sum.className = "cursor-pointer select-none px-2 py-2 text-sm font-semibold text-gray-700 rounded hover:bg-gray-50";
       sum.textContent = `Priorité basse (${groups[3].length})`;
       det.appendChild(sum);
-      sectionLowListEl = document.createElement("div");
-      sectionLowListEl.className = "mt-2";
-      groups[3].forEach(q => renderQuestion(q, sectionLowListEl, normalize, colorMap));
-      det.appendChild(sectionLowListEl);
-      container.appendChild(det);
-    }
 
-    // Activer le drag & drop sur chaque section
-    if (sectionHighListEl) enableDnD(sectionHighListEl, 1);
-    if (sectionMediumListEl) enableDnD(sectionMediumListEl, 2);
-    if (sectionLowListEl) enableDnD(sectionLowListEl, 3);
+      const box = mkList("mt-2 space-y-4"); box.dataset.section = "3"; det.appendChild(box);
+      groups[3].forEach(q => renderQuestion(q, box, normalize, colorMap));
+      container.appendChild(det);
+
+      enableDnD(box, 3);
+    }
 
     // 4) Panneau « Questions masquées — répétition espacée »
     if (hiddenSR.length) {
@@ -1858,7 +1880,51 @@ async function initApp() {
     showFormUI();
   }
 
-  // Drag & Drop helpers
+  // —— Helpers DnD améliorés ——
+  const dragState = { placeholder: null, active: false, scrollRAF: 0, lastY: 0, scrollEl: null };
+
+  function getScrollParent(el) {
+    let p = el;
+    while (p && p !== document.body) {
+      const s = getComputedStyle(p);
+      if (/(auto|scroll)/.test(s.overflowY)) return p;
+      p = p.parentElement;
+    }
+    return document.scrollingElement || document.body;
+  }
+
+  function startAutoScroll() {
+    const step = () => {
+      if (!dragState.active || !dragState.scrollEl) return;
+      const rect = dragState.scrollEl.getBoundingClientRect ? dragState.scrollEl.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      const y = dragState.lastY;
+      const margin = 60, speedMax = 18;
+      let dy = 0;
+      if (y < (rect.top + margin))        dy = -((rect.top + margin - y) / margin) * speedMax;
+      else if (y > (rect.bottom - margin)) dy = ((y - (rect.bottom - margin)) / margin) * speedMax;
+      if (dy) dragState.scrollEl.scrollBy(0, dy);
+      dragState.scrollRAF = requestAnimationFrame(step);
+    };
+    cancelAnimationFrame(dragState.scrollRAF);
+    dragState.scrollRAF = requestAnimationFrame(step);
+  }
+
+  function stopAutoScroll() {
+    dragState.active = false;
+    cancelAnimationFrame(dragState.scrollRAF);
+    dragState.scrollRAF = 0;
+    dragState.scrollEl = null;
+  }
+
+  function ensurePlaceholder() {
+    if (!dragState.placeholder) {
+      const ph = document.createElement("div");
+      ph.className = "__drop_ph h-4 my-2 rounded border-2 border-dashed border-gray-300";
+      dragState.placeholder = ph;
+    }
+    return dragState.placeholder;
+  }
+
   function getDragAfterElement(container, mouseY) {
     const els = [...container.querySelectorAll('[data-qid]:not(.dragging)')];
     return els.reduce((closest, el) => {
@@ -1872,37 +1938,54 @@ async function initApp() {
   function enableDnD(listEl, targetPriority) {
     listEl.addEventListener("dragover", (e) => {
       e.preventDefault();
+      dragState.lastY = e.clientY;
+      if (!dragState.active) {
+        dragState.active = true;
+        dragState.scrollEl = getScrollParent(listEl);
+        startAutoScroll();
+      }
       const after = getDragAfterElement(listEl, e.clientY);
-      const dragging = document.querySelector(".dragging");
-      if (!dragging) return;
-      if (after == null) listEl.appendChild(dragging);
-      else listEl.insertBefore(dragging, after);
+      const ph = ensurePlaceholder();
+      if (after == null) listEl.appendChild(ph);
+      else listEl.insertBefore(ph, after);
     });
 
-    listEl.addEventListener("drop", async (e) => {
+    listEl.addEventListener("drop", async () => {
+      stopAutoScroll();
       const dragging = document.querySelector(".dragging");
-      if (!dragging) return;
+      const ph = dragState.placeholder;
+      if (!dragging || !ph || !ph.parentElement) return;
+
+      ph.parentElement.insertBefore(dragging, ph);
+      ph.remove();
+
       const id = dragging.dataset.qid;
       const q  = (appState.qById && appState.qById.get(id)) || null;
-      if (!q) { refreshCurrentView(true); return; }
+      if (!q) return refreshCurrentView(true);
 
-      // si on change de section → on persiste la nouvelle priorité
-      const newPri = targetPriority;
-      if ((q.priority || 2) !== newPri) {
+      // Persister la priorité si la section change
+      if ((q.priority || 2) !== targetPriority) {
         try {
-          await updateConsigne({
-            id: q.id, label: q.label, category: q.category,
-            type: q.type, frequency: q.frequency, priority: newPri
-          });
-          q.priority = newPri; // optimiste
-        } catch (err) {
+          await updateConsigne({ id: q.id, label: q.label, category: q.category, type: q.type, frequency: q.frequency, priority: targetPriority });
+          q.priority = targetPriority; // optimiste
+        } catch (e) {
           showToast("❌ Erreur mise à jour priorité", "red");
-          refreshCurrentView(true);
-          return;
+          return refreshCurrentView(true);
         }
       }
-      // ordre intra-section = visuel (non persisté tant qu'on n'ajoute pas un champ "order" côté Sheet)
       flashSaved(listEl);
+    });
+
+    listEl.addEventListener("dragleave", (e) => {
+      // retire le placeholder si on sort vraiment du conteneur
+      if (!listEl.contains(e.relatedTarget)) {
+        dragState.placeholder?.remove();
+      }
+    });
+
+    document.addEventListener("dragend", () => {
+      stopAutoScroll();
+      dragState.placeholder?.remove();
     });
   }
 
