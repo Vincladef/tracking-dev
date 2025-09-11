@@ -1,31 +1,14 @@
 // SCRIPT.JS : 🧑 Identifier l’utilisateur depuis l’URL
 const WORKER_URL = "https://tight-snowflake-cdad.como-denizot.workers.dev/";
 
-async function apiFetch(method, pathOrParams, bodyObj) {
-  const payload = {
-    _proxy: true,
-    method,
-    apiUrl,
-    query: pathOrParams || "",
-    body: bodyObj || null
-  };
-  const res = await fetch(WORKER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+async function apiFetch(method, pathOrParams) {
+  if (method !== "GET") throw new Error("apiFetch() n'est utilisé ici que pour GET");
+  const u = new URL(WORKER_URL);
+  u.searchParams.set("apiUrl", apiUrl);
+  u.searchParams.set("query", pathOrParams || "");
+  const res = await fetch(u.toString()); // ← GET sans headers customs → pas de préflight
   const ct = res.headers.get("content-type") || "";
-  const ok = res.ok;
-
-  if (ct.includes("application/json")) {
-    const json = await res.json();
-    if (!ok) throw new Error(JSON.stringify(json).slice(0, 300));
-    return json;
-  } else {
-    const text = await res.text();
-    if (!ok) throw new Error(text.slice(0, 300));
-    try { return JSON.parse(text); } catch { return text; }
-  }
+  return ct.includes("application/json") ? res.json() : res.text();
 }
 
 function toQuestions(raw) {
@@ -171,8 +154,14 @@ function bindFieldAutosave(inputEl, qid) {
       }
     });
     inputEl.addEventListener("touchend", () => setTimeout(pushIfChanged, 0), { passive: true });
-  } else if (inputEl.tagName === "TEXTAREA" || inputEl.type === "text") {
-    inputEl.addEventListener("input", () => queueSoftSave({ [qid]: inputEl.value }, inputEl));
+  } else if (inputEl.tagName === "TEXTAREA") {
+    const push = () => queueSoftSave({ [qid]: inputEl.value }, inputEl);
+    inputEl.addEventListener("blur",   push);
+    inputEl.addEventListener("change", push);
+  } else if (inputEl.type === "text") {
+    const push = () => queueSoftSave({ [qid]: inputEl.value }, inputEl);
+    inputEl.addEventListener("change", push);
+    inputEl.addEventListener("blur",   push);
   }
 }
 
@@ -227,29 +216,41 @@ async function initApp() {
     });
     sel.appendChild(ogDates);
 
-    // Groupe Mode pratique (si dispo)
-    try {
-      const cats = await apiFetch("GET", `?mode=practice`);
-      if (Array.isArray(cats) && cats.length) {
-        // Séparateur visuel (dans un optgroup valide)
-        const sepGroup = document.createElement("optgroup");
-        sepGroup.label = "────────";
-        sel.appendChild(sepGroup);
+    // Lazy-load Mode pratique — catégories
+    const ogPractice = document.createElement("optgroup");
+    ogPractice.label = "Mode pratique — catégories (charger…)";
+    sel.appendChild(ogPractice);
 
-        const ogPractice = document.createElement("optgroup");
-        ogPractice.label = "Mode pratique — catégories";
-        cats.forEach(cat => {
-          const o = document.createElement("option");
-          o.textContent = `Mode pratique — ${cat}`;
-          o.dataset.mode = "practice";
-          o.dataset.category = cat;
-          ogPractice.appendChild(o);
-        });
-        sel.appendChild(ogPractice);
+    let _catsLoaded = false;
+    async function loadPracticeCatsOnce() {
+      if (_catsLoaded) return; _catsLoaded = true;
+      try {
+        const cats = await apiFetch("GET", `?mode=practice`);
+        if (Array.isArray(cats) && cats.length) {
+          // insère un séparateur visuel au moment du chargement
+          const sepGroup = document.createElement("optgroup");
+          sepGroup.label = "────────";
+          sel.appendChild(sepGroup);
+
+          ogPractice.label = "Mode pratique — catégories";
+          cats.forEach(cat => {
+            const o = document.createElement("option");
+            o.textContent = `Mode pratique — ${cat}`;
+            o.dataset.mode = "practice";
+            o.dataset.category = cat;
+            ogPractice.appendChild(o);
+          });
+        } else {
+          ogPractice.label = "Mode pratique — (aucune catégorie)";
+        }
+      } catch (e) {
+        console.warn("Impossible de charger les catégories de pratique", e);
+        ogPractice.label = "Mode pratique — (erreur)";
       }
-    } catch (e) {
-      console.warn("Impossible de charger les catégories de pratique", e);
     }
+    // charge à la première interaction seulement
+    sel.addEventListener("mousedown", loadPracticeCatsOnce, { once: true });
+    sel.addEventListener("focus",     loadPracticeCatsOnce, { once: true });
 
     // Sélectionner automatiquement la première date
     const firstDate = ogDates.querySelector("option");
@@ -491,8 +492,7 @@ async function initApp() {
 
     fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
       method: "POST",
-      body: JSON.stringify(entries),
-      headers: { "Content-Type": "application/json" }
+      body: JSON.stringify(entries)
     })
       .then(async (res) => {
         const text = await res.text().catch(() => "");
@@ -837,7 +837,6 @@ async function initApp() {
 
       const postOnce = () => fetch(WORKER_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
 
@@ -856,7 +855,7 @@ async function initApp() {
         else { showToast("❌ Échec de l’enregistrement auto", "red"); }
         _softAnchors.clear();
       }
-    }, 600);
+    }, 1500);
   }
 
   // ⬅️ Expose queueSoftSave au global pour que bindFieldAutosave puisse l'appeler
@@ -873,7 +872,7 @@ async function initApp() {
       const body = { apiUrl, ..._softBuffer };
       if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
       else { body._mode = "practice"; body._category = selected.dataset.category; }
-      navigator.sendBeacon(WORKER_URL, new Blob([JSON.stringify(body)], { type:"application/json" }));
+      navigator.sendBeacon(WORKER_URL, JSON.stringify(body));
     }
   });
 
@@ -1039,7 +1038,6 @@ async function initApp() {
           body[tKey] = getSR() ? "on" : "off";
           await fetch(WORKER_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body)
           });
           showToast("✅ Consigne mise à jour");
@@ -1047,7 +1045,6 @@ async function initApp() {
         } else {
           await fetch(WORKER_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
             _action: "consigne_create",
             category: payload.category,
@@ -1079,7 +1076,7 @@ async function initApp() {
                 const body = { apiUrl, [tKey]: "on" };
                 if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
                 else { body._mode = "practice"; body._category = selected.dataset.category; }
-                await fetch(WORKER_URL, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+                await fetch(WORKER_URL, { method:"POST", body: JSON.stringify(body) });
               }
             }
           } catch (e) {
@@ -1128,7 +1125,6 @@ async function initApp() {
     };
     await fetch(WORKER_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
   }
@@ -1146,7 +1142,6 @@ async function initApp() {
     };
     await fetch(WORKER_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
   }
@@ -1155,7 +1150,6 @@ async function initApp() {
     const body = { _action: "consigne_delete", id, apiUrl };
     await fetch(WORKER_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
   }
