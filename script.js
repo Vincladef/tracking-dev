@@ -903,10 +903,7 @@ async function initApp() {
 
     const renderRow = (c) => {
       const p = Number(c?.priority ?? 2);
-      const tone =
-        p === 1 ? "bg-gray-200 border-gray-400 border-l-8"
-      : p === 2 ? "bg-gray-100 border-gray-300 border-l-6"
-                : "bg-gray-50  border-gray-200 border-l-4";
+      const tone = "bg-gray-50 border-gray-200 border-l-4";
 
       const row = document.createElement("div");
       row.className = `px-4 py-3 mb-2 flex items-center gap-3 border rounded ${tone}`;
@@ -1423,11 +1420,8 @@ async function initApp() {
   function renderQuestion(q, container, normalize, colorMap) {
     const p = Number(q?.priority ?? 2);
 
-    // Nuances de gris (plus foncé pour priorité haute)
-    const toneWrapper =
-      p === 1 ? "bg-gray-200 border border-gray-400 border-l-8"
-    : p === 2 ? "bg-gray-100 border border-gray-300 border-l-6"
-              : "bg-gray-50  border border-gray-200 border-l-4";
+    // 🔁 même encadré pour toutes les priorités (ancien "basse")
+    const toneWrapper = "bg-gray-50 border border-gray-200 border-l-4";
 
     const wrapper = document.createElement("div");
     wrapper.className = `mb-8 p-4 rounded-xl shadow-sm ${toneWrapper}`;
