@@ -891,23 +891,49 @@ async function initApp() {
     const wrap = document.getElementById("consignes-list");
     if (!wrap) return;
     wrap.innerHTML = "";
-    consignes.forEach(c => {
-      const archived = (c.frequency || "").toLowerCase().includes("archiv");
-      const row = document.createElement("div");
-      row.className = "px-4 py-3 flex items-center gap-3";
 
+    // 1) Grouper par priorité (1=Haute, 2=Moyenne, 3=Faible)
+    const groups = { 1: [], 2: [], 3: [] };
+    (Array.isArray(consignes) ? consignes : []).forEach(c => {
+      const p = Number(c?.priority ?? 2);
+      if (p === 1 || p === 2 || p === 3) groups[p].push(c); else groups[2].push(c);
+    });
+
+    // Tri alphabétique par label dans chaque groupe
+    const byLabel = (a,b) => (a.label || "").localeCompare(b.label || "", "fr", { sensitivity:"base" });
+    groups[1].sort(byLabel); groups[2].sort(byLabel); groups[3].sort(byLabel);
+
+    // Petite fabrique de lignes uniformes
+    const renderRow = (c) => {
+      const p = Number(c?.priority ?? 2);
+      const tone = p === 1
+        ? "bg-red-50 border-red-300"
+        : p === 2
+          ? "bg-yellow-50 border-yellow-300"
+          : "bg-gray-50 border-gray-300";
+
+      const priLabel = p === 1 ? "⚡️ Haute" : (p === 2 ? "🎯 Moyenne" : "🌿 Faible");
+
+      const row = document.createElement("div");
+      row.className = `px-4 py-3 mb-2 flex items-center gap-3 border border-l-4 rounded ${tone}`;
+
+      // Bloc gauche (titre + meta)
       const left = document.createElement("div");
       left.className = "flex-1 min-w-0";
       left.innerHTML = `
-      <div class="font-medium ${archived ? 'line-through text-gray-400' : ''}">${c.label}</div>
-      <div class="text-xs text-gray-500">
-        Cat: <b>${c.category || '-'}</b> · Type: <b>${c.type || '-'}</b> · Fréq: <b>${c.frequency || '-'}</b> · Pri: <b>${c.priority ?? '-'}</b>
-      </div>
-    `;
+        <div class="font-medium">${c.label}</div>
+        <div class="text-xs text-gray-600 mt-0.5">
+          <span class="inline-flex items-center px-1.5 py-0.5 border rounded mr-2">${priLabel}</span>
+          Cat: <b>${c.category || "-"}</b>
+          · Type: <b>${c.type || "-"}</b>
+          · Fréq: <b>${c.frequency || "-"}</b>
+        </div>`;
       row.appendChild(left);
 
+      // Boutons
       const btns = document.createElement("div");
       btns.className = "flex items-center gap-2";
+
       const edit = document.createElement("button");
       edit.className = "px-2 py-1 text-sm border rounded hover:bg-gray-50";
       edit.textContent = "Modifier";
@@ -919,20 +945,14 @@ async function initApp() {
       del.textContent = "Supprimer";
       del.onclick = async () => {
         if (!confirm("Supprimer définitivement cette consigne ?")) return;
-
-        // ✅ UI optimiste : on retire la ligne immédiatement
-        const rowEl = row;
-        const parent = rowEl.parentElement;
+        const rowEl = row, parent = rowEl.parentElement;
         rowEl.remove();
-
         try {
           await deleteConsigne(c.id);
           showToast("🗑️ Supprimée");
-          // Recharge léger pour rester 100% synchro avec le backend
-          await loadConsignes();
-          refreshCurrentView(true);
+          await loadConsignes();       // recharge la liste
+          refreshCurrentView(true);    // et la vue courante (fresh)
         } catch (e) {
-          // rollback en cas d'échec réseau
           if (parent) parent.appendChild(rowEl);
           showToast("❌ Erreur de suppression", "red");
           console.error(e);
@@ -941,8 +961,47 @@ async function initApp() {
       btns.appendChild(del);
 
       row.appendChild(btns);
-      wrap.appendChild(row);
-    });
+      return row;
+    };
+
+    // Titres de section
+    const addHeader = (title, count, cls="") => {
+      const h = document.createElement("div");
+      h.className = `px-2 py-2 text-sm font-semibold ${cls}`;
+      h.textContent = `${title} (${count})`;
+      wrap.appendChild(h);
+    };
+
+    // 2) Affichage : Haute (visible & accentuée) → Moyenne → Faible (repliées)
+    if (groups[1].length) {
+      addHeader("Priorité haute", groups[1].length, "text-red-700");
+      groups[1].forEach(c => wrap.appendChild(renderRow(c)));
+    }
+
+    if (groups[2].length) {
+      addHeader("Priorité moyenne", groups[2].length, "text-yellow-700 mt-3");
+      groups[2].forEach(c => wrap.appendChild(renderRow(c)));
+    }
+
+    if (groups[3].length) {
+      const det = document.createElement("details");
+      det.className = "mt-3";
+      const sum = document.createElement("summary");
+      sum.className = "cursor-pointer select-none px-2 py-2 text-sm font-semibold text-gray-700 rounded hover:bg-gray-50";
+      sum.textContent = `Priorité faible (${groups[3].length})`;
+      det.appendChild(sum);
+
+      const box = document.createElement("div");
+      box.className = "mt-2";
+      groups[3].forEach(c => box.appendChild(renderRow(c)));
+
+      det.appendChild(box);
+      wrap.appendChild(det);
+    }
+
+    if (!groups[1].length && !groups[2].length && !groups[3].length) {
+      wrap.innerHTML = `<div class="text-sm text-gray-500 px-2 py-3">Aucune consigne pour le moment.</div>`;
+    }
   }
 
   async function openConsigneModal(c = null) {
@@ -995,8 +1054,8 @@ async function initApp() {
     form.querySelector('[name="label"]')?.focus();
     form.addEventListener('keydown', (e)=>{ if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') form.requestSubmit(); });
 
-    // Drag-scroll
-    enableDragScroll(document.getElementById("consigne-body"), document.getElementById("drag-handle"));
+    // Drag-scroll (désactivé)
+    // enableDragScroll(document.getElementById("consigne-body"), document.getElementById("drag-handle"));
 
     form.onsubmit = async (e) => {
       e.preventDefault();
