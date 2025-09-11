@@ -21,7 +21,7 @@ export default {
       });
     }
 
-    // --- GET "simple" (proxy lecture) + petit cache 60s ---
+    // --- GET "simple" (proxy lecture) + cache conditionnel ---
     if (request.method === "GET") {
       const apiUrl = url.searchParams.get("apiUrl");
       const query  = url.searchParams.get("query") || "";
@@ -29,14 +29,22 @@ export default {
 
       const target = new URL(query.startsWith("?") ? query : "?" + query, apiUrl).toString();
 
+      // ⬅️ pas de cache si nocache=1 OU si on touche aux consignes / catégories
+      const skipCache =
+        url.searchParams.has("nocache") ||
+        /(^|\?)mode=(consignes|practice)($|&)/.test(query);
+
       const cache = caches.default;
       const cacheKey = new Request(target, { method: "GET" });
-      let cached = await cache.match(cacheKey);
-      if (cached) return withCORS(cached);
 
-      const upstream = await fetch(target, { method: "GET" });
+      if (!skipCache) {
+        const cached = await cache.match(cacheKey);
+        if (cached) return withCORS(cached);
+      }
+
+      const upstream = await fetch(target, { method: "GET", headers: skipCache ? { "Cache-Control": "no-cache" } : {} });
       const headers = new Headers(upstream.headers);
-      headers.set("Cache-Control", "public, max-age=60, s-maxage=60");
+      headers.set("Cache-Control", skipCache ? "no-store" : "public, max-age=60, s-maxage=60");
 
       const resp = new Response(await upstream.arrayBuffer(), {
         status: upstream.status,
@@ -44,7 +52,7 @@ export default {
         headers,
       });
 
-      ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+      if (!skipCache) ctx.waitUntil(cache.put(cacheKey, resp.clone()));
       return withCORS(resp);
     }
 

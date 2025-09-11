@@ -1,12 +1,17 @@
 // SCRIPT.JS : 🧑 Identifier l’utilisateur depuis l’URL
 const WORKER_URL = "https://tight-snowflake-cdad.como-denizot.workers.dev/";
 
-async function apiFetch(method, pathOrParams) {
+async function apiFetch(method, pathOrParams, opts = {}) {
   if (method !== "GET") throw new Error("apiFetch() n'est utilisé ici que pour GET");
+  let query = pathOrParams || "";
+  if (opts.fresh) {
+    query += (query.includes("?") ? "&" : "?") + "nocache=1&_=" + Date.now();
+  }
   const u = new URL(WORKER_URL);
   u.searchParams.set("apiUrl", apiUrl);
-  u.searchParams.set("query", pathOrParams || "");
-  const res = await fetch(u.toString()); // ← GET sans headers customs → pas de préflight
+  u.searchParams.set("query", query);
+  if (opts.fresh) u.searchParams.set("nocache", "1"); // hint pour le Worker
+  const res = await fetch(u.toString());
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : res.text();
 }
@@ -271,10 +276,10 @@ async function initApp() {
   }
   function freqSetToString(set) { return Array.from(set).join(", "); }
   async function getAllCategories() {
-    const cats = await apiFetch("GET", `?mode=practice`).catch(()=>[]);
+    const cats = await apiFetch("GET", `?mode=practice`, { fresh: true }).catch(()=>[]);
     const set = new Set(Array.isArray(cats)?cats:[]);
     try {
-      const all = await apiFetch("GET", `?mode=consignes`);
+      const all = await apiFetch("GET", `?mode=consignes`, { fresh: true });
       (Array.isArray(all)?all:[]).forEach(x => { if (x.category) set.add(x.category); });
     } catch {}
     return Array.from(set).filter(Boolean).sort((a,b)=>a.localeCompare(b,'fr'));
@@ -548,13 +553,13 @@ async function initApp() {
     if (loader) loader.classList.add("hidden");
   }
 
-  function loadFormForDate(dateISO) {
+  function loadFormForDate(dateISO, opts = {}) {
     clearFormUI();
     const loader = document.getElementById("loader");
     if (loader) loader.classList.remove("hidden");
     console.log(`📡 Chargement des questions pour la date : ${dateISO}`);
 
-    apiFetch("GET", `?date=${encodeURIComponent(dateISO)}`)
+    apiFetch("GET", `?date=${encodeURIComponent(dateISO)}`, opts)
       .then(raw => {
         const questions = toQuestions(raw);
         if (!Array.isArray(questions)) {
@@ -573,14 +578,14 @@ async function initApp() {
       });
   }
 
-  async function loadPracticeForm(category) {
+  async function loadPracticeForm(category, opts = {}) {
     clearFormUI();
     const loader = document.getElementById("loader");
     if (loader) loader.classList.remove("hidden");
     console.log(`📡 Chargement des questions pour la catégorie : ${category}`);
 
     try {
-      const raw = await apiFetch("GET", `?mode=practice&category=${encodeURIComponent(category)}`);
+      const raw = await apiFetch("GET", `?mode=practice&category=${encodeURIComponent(category)}`, opts);
       const questions = toQuestions(raw);
       if (!Array.isArray(questions)) {
         console.error("Réponse inattendue (pas un tableau) :", raw);
@@ -793,14 +798,14 @@ async function initApp() {
     canvas.addEventListener("mouseleave", () => { tip.style.opacity = "0"; });
   }
 
-  function refreshCurrentView() {
+  function refreshCurrentView(fresh = false) {
     const sel = document.getElementById("date-select");
     if (!sel || !sel.selectedOptions.length) return;
     const opt = sel.selectedOptions[0];
     if ((opt.dataset.mode || "daily") === "practice") {
-      loadPracticeForm(opt.dataset.category);
+      loadPracticeForm(opt.dataset.category, { fresh });
     } else {
-      loadFormForDate(opt.dataset.date);
+      loadFormForDate(opt.dataset.date, { fresh });
     }
   }
 
@@ -878,7 +883,7 @@ async function initApp() {
 
   // ====== GESTION CONSIGNES (UI) ======
   async function loadConsignes() {
-    const list = await apiFetch("GET", `?mode=consignes`);
+    const list = await apiFetch("GET", `?mode=consignes`, { fresh: true });
     renderConsignesManager(Array.isArray(list) ? list : []);
   }
 
@@ -909,20 +914,6 @@ async function initApp() {
       edit.onclick = () => openConsigneModal(c);
       btns.appendChild(edit);
 
-      const arch = document.createElement("button");
-      arch.className = "px-2 py-1 text-sm border rounded hover:bg-gray-50";
-      arch.textContent = archived ? "Désarchiver" : "Archiver";
-      arch.onclick = async () => {
-        await updateConsigne({
-          id: c.id,
-          frequency: archived ? "pratique délibérée" : "archivé"
-        });
-        showToast(archived ? "✅ Désarchivée" : "✅ Archivée");
-        await loadConsignes();
-        refreshCurrentView();
-      };
-      btns.appendChild(arch);
-
       const del = document.createElement("button");
       del.className = "px-2 py-1 text-sm border rounded hover:bg-red-50 text-red-700 border-red-200";
       del.textContent = "Supprimer";
@@ -939,7 +930,7 @@ async function initApp() {
           showToast("🗑️ Supprimée");
           // Recharge léger pour rester 100% synchro avec le backend
           await loadConsignes();
-          refreshCurrentView();
+          refreshCurrentView(true);
         } catch (e) {
           // rollback en cas d'échec réseau
           if (parent) parent.appendChild(rowEl);
@@ -1084,7 +1075,7 @@ async function initApp() {
           }
         }
         closeConsigneModal();
-        refreshCurrentView();
+        refreshCurrentView(true);
       } catch (err) {
         console.error(err);
         showToast("❌ Erreur consigne", "red");
@@ -1379,7 +1370,7 @@ async function initApp() {
     archBtn.onclick = async () => {
       await updateConsigne({ id: q.id, frequency: archived ? "pratique délibérée" : "archivé" });
       showToast(archived ? "✅ Désarchivée" : "✅ Archivée");
-      refreshCurrentView();
+      refreshCurrentView(true);
     };
     actions.appendChild(archBtn);
 
@@ -1399,7 +1390,7 @@ async function initApp() {
         await deleteConsigne(q.id);
         showToast("🗑️ Supprimée");
         // on peut recharger en arrière-plan pour être 100% synchro
-        refreshCurrentView();
+        refreshCurrentView(true);
       } catch (e) {
         // rollback en cas d'échec
         if (parent) parent.appendChild(card);
