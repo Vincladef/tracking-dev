@@ -616,19 +616,22 @@ async function initApp() {
   dateSelect.addEventListener("change", handleSelectChange);
 
   function handleSelectChange() {
+    const sel = document.getElementById("date-select");
+    if (!sel || !sel.selectedOptions.length) return;
+    
+    const selected = sel.selectedOptions[0];
+    const mode = selected.dataset.mode || "daily";
+    
+    // Mise à jour de l'état global
+    appState.mode = mode;
+    appState.selectedDate = (mode === "daily") ? selected.dataset.date : null;
+    appState.currentCategory = (mode === "practice") ? selected.dataset.category : null;
+    appState.currentDate = appState.selectedDate;  // pour compatibilité
+    
     // on repart propre à chaque changement
     appState.delayValues = {};
     appState.srToggles = {};
     appState.srBaseline = {};
-    
-    const sel = document.getElementById("date-select");
-    if (!sel || !sel.selectedOptions.length) return;
-    const selected = sel.selectedOptions[0];
-    const mode = selected.dataset.mode || "daily";
-
-    // ✨ garde l'état courant pour les filtres front (SR / pratique)
-    appState.mode = mode;
-    appState.selectedDate = (mode === "daily") ? selected.dataset.date : null;
 
     if (mode === "daily") {
       console.log(`➡️ Changement de mode : Journalier, date=${selected.dataset.date}`);
@@ -1037,44 +1040,61 @@ async function initApp() {
   }
 
   // ----- AUTO-SAVE DOUX -----
-  const _softBuffer = {};
+  let _softBuffer = {};  // Changed from const to let
   let _softTimer = null;
-  let _softAnchors = new Set();
+  let _softAnchors = [];  // Changed from Set to Array
   
   // Flush immédiat du _softBuffer (POST "now")
   // Utilise le même contexte (_mode/_date ou _category) que queueSave()
   async function flushSoftSaveNow(reason = "manual", qid = "") {
     const keys = Object.keys(_softBuffer);
-    const changedKeys = keys.filter(isAnswerKey);
     if (!keys.length) return { ok: true, skipped: true };
 
-    const payload = { ..._softBuffer, _action: 'save_answers' };
-    if (appState.mode) payload._mode = appState.mode;
-    if (appState.currentDate) payload._date = appState.currentDate;
-    if (appState.currentCategory) payload._category = appState.currentCategory;
+    const selected = document.getElementById("date-select")?.selectedOptions[0];
+    const mode = selected?.dataset.mode || appState.mode || "daily";
+
+    // snapshot pour mise à jour locale de l'historique
+    const snapshot = { ..._softBuffer };
+
+    const payload = {
+      _action: 'save_answers',
+      apiUrl,
+      user,
+      ..._softBuffer,
+      _mode: mode
+    };
+    
+    if (mode === "daily") {
+      payload._date = selected?.dataset.date || appState.selectedDate || appState.currentDate;
+    } else {
+      payload._category = selected?.dataset.category || appState.currentCategory;
+    }
 
     // Ajouter les ancres pour le feedback visuel
-    if (qid && !_softAnchors.some(a => a.dataset.qid === qid)) {
+    if (qid) {
       const anchor = document.querySelector(`[data-qid="${qid}"]`);
-      if (anchor) _softAnchors.push(anchor);
+      if (anchor && !_softAnchors.includes(anchor)) {
+        _softAnchors.push(anchor);
+      }
     }
 
     try {
       const res = await postWithBackoff(payload);
-      if (res.ok) {
-        _softAnchors.forEach(a => flashSaved(a));
-        // Ne plus recharger toute la page pour les réponses
-        const changedAnswerIds = changedKeys.filter(isAnswerKey);
-        if (changedAnswerIds.length) {
-          updateHistoryInPlace(_softBuffer);  // Mise à jour locale de l'historique
-        }
-        _softBuffer = {};
-        _softAnchors = [];
-        return { ok: true };
-      } else {
+      if (!res.ok) {
         showToast("❌ Échec de l'enregistrement", "red");
-        return { ok: false, error: res.error };
+        return { ok: false, status: res.status };
       }
+
+      // feedback visuel
+      _softAnchors.forEach(a => flashSaved(a));
+      _softAnchors = [];
+
+      // ✅ mise à jour locale de l'historique (pas de reload global)
+      updateHistoryInPlace(snapshot);
+
+      // purge du buffer
+      _softBuffer = {};
+      return { ok: true };
     } catch (e) {
       console.error("Erreur flushSoftSaveNow", e);
       showToast("❌ Erreur réseau", "red");
@@ -1101,15 +1121,38 @@ async function initApp() {
       const keys = Object.keys(_softBuffer);
       if (!keys.length) return;
 
+      // snapshot pour mise à jour locale
+      const snapshot = { ..._softBuffer };
+
       const selected = document.getElementById("date-select")?.selectedOptions[0];
       const mode = selected?.dataset.mode || "daily";
-      const body = { apiUrl, user, ..._softBuffer };  // user ajouté
-      if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
-      else { body._mode = "practice"; body._category = selected.dataset.category; }
-
-      // Generate a unique transaction ID to prevent duplicate processing
-      body.__txid = (crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`);
+      const body = { 
+        apiUrl, 
+        user, 
+        ..._softBuffer,
+        _mode: mode
+      };
       
+      if (mode === "daily") {
+        body._date = selected?.dataset.date || appState.selectedDate || appState.currentDate;
+      } else {
+        body._category = selected?.dataset.category || appState.currentCategory;
+      }
+
+      // id transaction pour éviter doublons
+      body.__txid = (crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`);
+
+      // Badge "Enregistrement..."
+      let b = document.getElementById("__saving_badge__");
+      if (!b) {
+        b = document.createElement("div");
+        b.id = "__saving_badge__";
+        b.style = "position:fixed; bottom:20px; right:20px; background:#4CAF50; color:white; padding:8px 16px; border-radius:4px; z-index:9999; opacity:0; transition:opacity 0.3s;";
+        document.body.appendChild(b);
+      }
+      b.textContent = "Enregistrement...";
+      b.style.opacity = "1";
+
       let ok = false;
       try {
         const res = await postWithRetry(WORKER_URL, body);
@@ -1118,24 +1161,23 @@ async function initApp() {
         console.error("❌ Envoi impossible :", e);
         showToast("❌ Erreur d'envoi (quota). Réessaie dans un instant.", "red");
       } finally {
+        // purge
         for (const k of keys) delete _softBuffer[k];
         const b = document.getElementById("__saving_badge__");
         if (b) setTimeout(()=>{ b.style.opacity = "0"; }, 80);
 
         if (ok) {
           _softAnchors.forEach(a => flashSaved(a));
+          _softAnchors = [];
 
-          // If we just saved an answer (e.g., Likert/text),
-          // refresh the view to get an updated history
-          // (only if at least one key looks like a numeric consigne ID)
+          // Mise à jour locale de l'historique uniquement
           const changedAnswerIds = keys.filter(isAnswerKey);
           if (changedAnswerIds.length) {
-            refreshCurrentView(true); // GET fresh => updated history and chart
+            updateHistoryInPlace(snapshot);
           }
         } else {
-          showToast("❌ Échec de l’enregistrement auto", "red");
+          showToast("❌ Échec de l'enregistrement auto", "red");
         }
-        _softAnchors.clear();
       }
     }, 1500);
   }
