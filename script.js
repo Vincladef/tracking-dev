@@ -964,52 +964,35 @@ async function initApp() {
   let _softAnchors = new Set();
   
   // Flush immédiat du _softBuffer (POST "now")
-  // Utilise le même contexte (_mode/_date ou _category) que queueSoftSave()
+  // Utilise le même contexte (_mode/_date ou _category) que queueSave()
   async function flushSoftSaveNow(reason = "manual", qid = "") {
-    try {
-      const keys = Object.keys(_softBuffer);
-      if (!keys.length) return { ok: true, skipped: true };
+    const keys = Object.keys(_softBuffer);
+    if (!keys.length) return { ok: true, skipped: true };
 
-      const selected = document.getElementById("date-select")?.selectedOptions[0];
-      const mode = selected?.dataset.mode || "daily";
-      const body = { apiUrl, user, ..._softBuffer };
-
-      if (mode === "daily") { 
-        body._mode = "daily"; 
-        body._date = selected.dataset.date; 
-      } else { 
-        body._mode = "practice"; 
-        body._category = selected.dataset.category; 
-      }
-
-      console.log(`[SR-FLUSH] reason=${reason} id=${qid} → POST`, {
-        keys,
-        bodyPreview: Object.fromEntries(keys.map(k => [k, body[k]])),
-        mode,
-        ts: Date.now()
-      });
-
-      // On vide le buffer AVANT le POST pour éviter un double envoi en cas de double-clic
-      for (const k of keys) delete _softBuffer[k];
-
-      const response = await fetch(WORKER_URL, { 
-        method: "POST", 
-        body: JSON.stringify(body) 
-      });
-      
-      if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-      
-      console.log(`[SR-FLUSH] OK (${reason})`);
-      return { ok: true };
-    } catch (e) {
-      console.error("[SR-FLUSH] FAIL", e);
-      return { ok: false, error: e };
-    } finally {
-      const b = document.getElementById("__saving_badge__");
-      if (b) b.style.opacity = "0";
+    const selected = document.getElementById("date-select")?.selectedOptions[0];
+    const mode = selected?.dataset.mode || "daily";
+    const body = { apiUrl, user, ..._softBuffer };
+    if (mode === "daily") {
+      body._mode = "daily";
+      body._date = selected.dataset.date;
+    } else {
+      body._mode = "practice";
+      body._category = selected.dataset.category;
     }
 
-      if (ok) {
+    console.log(`[SR-FLUSH] reason=${reason} id=${qid} → POST`, {
+      keys,
+      bodyPreview: Object.fromEntries(keys.map(k => [k, body[k]])),
+      mode,
+      ts: Date.now()
+    });
+
+    // Vider le buffer AVANT le POST pour éviter les doubles envois
+    for (const k of keys) delete _softBuffer[k];
+
+    try {
+      const res = await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
+      if (res.ok) {
         _softAnchors.forEach(a => flashSaved(a));
         console.log("[SR-FLUSH] ✅ OK");
         _softAnchors.clear();
