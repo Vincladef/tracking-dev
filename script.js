@@ -415,22 +415,31 @@ async function initApp() {
     handleEl.addEventListener("pointercancel", stop);
   }
 
-  function addInlineSRToggle(wrapper, q){
-    const srCurrent = q.scheduleInfo?.sr || { on:true }; // ON par défaut (souhaité)
-    const hasSrFromBackend = !!(q.scheduleInfo && Object.prototype.hasOwnProperty.call(q.scheduleInfo, "sr"));
-
-    if (!(q.id in appState.srBaseline)) appState.srBaseline[q.id] = srCurrent.on ? "on" : "off";
-    if (!(q.id in appState.srToggles))  appState.srToggles[q.id]  = srCurrent.on ? "on" : "off";
-
-    // 🔁 Si le backend n'a pas d'info SR mais l'UI est ON par défaut → on synchronise une fois
-    if (!hasSrFromBackend && srCurrent.on && !appState.__srAutoPushed[q.id]) {
-      appState.__srAutoPushed[q.id] = true;
-      // poste __srToggle__<id> = "on" via autosave (avec le contexte _mode/_date ou _category déjà géré dans queueSoftSave)
-      queueSoftSave({ ["__srToggle__" + q.id]: "on" }, wrapper);
-      // baseline & toggle à jour pour éviter un 2e post
+  function addInlineSRToggle(container, q, opts = {}) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "flex items-center gap-2";
+    
+    // Get current SR state with fallbacks
+    const srCurrent = q.scheduleInfo?.sr || {};
+    const hasSrFromBackend = srCurrent.on !== undefined;
+    const now = hasSrFromBackend ? (srCurrent.on ? "on" : "off") : (appState.srToggles[q.id] || "off");
+    
+    // Update appState if needed
+    if (hasSrFromBackend) {
+      appState.srToggles[q.id] = now;
+    } else if (!appState.srBaseline[q.id]) {
+      // If no SR info from backend and no baseline, auto-push "on"
       appState.srBaseline[q.id] = "on";
-      appState.srToggles[q.id]  = "on";
+      appState.srToggles[q.id] = "on";
+      if (!hasSrFromBackend) {
+        console.log(`[SR] Auto-push initial ON (back manquant) id=${q.id}`);
+        // Queue up the toggle to be sent to the server
+        setTimeout(() => apiFetch("POST", `__srToggle__${q.id}=on`).catch(console.error), 0);
+      }
     }
+    
+    console.log(`[SR] UI toggle id=${q.id} "${q.label || ''}" → ${now} (baseline=${appState.srBaseline[q.id]})`);
+    
     const row = document.createElement("div");
     row.className = "mt-2 flex items-center gap-3";
     const label = document.createElement("span");
@@ -1236,22 +1245,25 @@ async function initApp() {
             // Quand ça finit, on fait le reste
             pCreate.then(({ok,newId})=>{
               if (ok) {
-                if (getSR() && newId) try {
-                  const selected = document.getElementById("date-select")?.selectedOptions[0];
-                  const mode = selected?.dataset.mode || "daily";
-                  const body = { apiUrl, user, ["__srToggle__"+newId]: "on" };
-                  if (mode === "daily") { body._mode="daily"; body._date=selected.dataset.date; }
-                  else { body._mode="practice"; body._category=selected.dataset.category; }
-                  fetch(WORKER_URL, { method:"POST", body:JSON.stringify(body) });
                 } catch {}
-                loadConsignes().catch(()=>{});
-                refreshCurrentView(true);
-                showToast("✅ Consigne créée");
-              } else {
-                showToast("❌ Échec de création", "red");
               }
-            }).catch(()=> showToast("❌ Échec de création", "red"));
-            return; // on a déjà fermé
+              refreshCurrentView(true);
+              setTimeout(()=> {
+                // petit check visuel après rechargement
+                const q = appState.qById?.get(String(newId));
+                console.log(`[CONS] Vérif post-création id=${newId}: srOnUI=${q?.scheduleInfo?.sr?.on ? 'ON' : 'OFF'} skipped=${!!q?.skipped}`);
+              }, 400);
+              showToast("✅ Consigne créée");
+              modal.classList.add("hidden");
+            } else {
+              showToast("❌ Erreur lors de la création", "red");
+              isSubmitting = false;
+            }
+          }).catch(e => {
+            console.error(e);
+            showToast("❌ Erreur lors de la création", "red");
+            isSubmitting = false;
+          });return; // on a déjà fermé
           }
 
           // Si on est ici, la création a répondu vite
@@ -1576,7 +1588,7 @@ async function initApp() {
 
     const editBtn = document.createElement("button");
     editBtn.type = "button";
-    editBtn.className = "text-blue-700 hover:underline";
+    editBtn.className = "text-gray-600 hover:underline";
     editBtn.textContent = "Modifier";
     editBtn.onclick = () => openConsigneModal({
       id: q.id, label: q.label, category: q.category, type: q.type || "Oui/Non",
@@ -1613,7 +1625,7 @@ async function initApp() {
 
     const delBtn = document.createElement("button");
     delBtn.type = "button";
-    delBtn.className = "text-red-600 hover:underline";
+    delBtn.className = "text-red-500 hover:text-red-600 hover:underline";
     delBtn.textContent = "Supprimer";
     delBtn.onclick = async () => {
       if (!confirm("Supprimer définitivement cette consigne ?")) return;
@@ -1693,13 +1705,18 @@ async function initApp() {
     const toggleBtn = lastChild?.querySelector('button');
     if (toggleBtn && toggleBtn.onclick) {
       toggleBtn.onclick.onChange = (now) => {
-        if (now === "on") {
+        if (now === "on") { // devient masquée
+          console.log(`[SR] Toggle depuis VISIBLE → on | id=${q.id} "${q.label}"`);
           try {
-            q.skipped = true; // bascule immédiate en masquée
+            q.skipped = true;                       // ← clé pour masquer tout de suite
             const sr = Object.assign({}, q.scheduleInfo?.sr, { on:true });
             q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr });
           } catch {}
-          renderQuestions(appState.lastQuestions);
+          renderQuestions(appState.lastQuestions);  // re-render immédiat
+          setTimeout(() => {
+            const nowHidden = !!appState.qById.get(String(q.id))?.skipped;
+            console.log(`[SR] Résultat déplacement (visible→masqué) id=${q.id}: hidden=${nowHidden}`);
+          }, 0);
         }
       };
     }
@@ -1720,7 +1737,7 @@ async function initApp() {
     // Bouton d'ouverture
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
-    toggleBtn.className = "mt-3 text-sm text-blue-600 hover:underline";
+    toggleBtn.className = "mt-3 text-sm text-gray-600 hover:underline";
     toggleBtn.textContent = "📓 Voir l'historique des réponses";
 
     // Bloc contenu (replié par défaut)
@@ -1926,41 +1943,41 @@ async function initApp() {
         title.textContent = q.label;
         card.appendChild(title);
 
-        // Actions sous le titre avec wrap mobile-friendly
+        // actions: SR / Modifier / Supprimer (en dessous du titre)
         const actions = document.createElement("div");
         actions.className = "mt-1 flex flex-wrap items-center gap-3 text-sm";
 
-        // Show history directly if available
-        if (q.history?.length) {
-          const historyContainer = document.createElement("div");
-          historyContainer.className = "mt-2";
-          renderHistory(q.history, historyContainer, normalize, colorMap);
-          card.appendChild(historyContainer);
-        }
-
-        // SR ON/OFF (et bascule live -> visible)
+        // SR ON/OFF avec bascule live -> visible + logs
         const srRow = document.createElement("div");
-        addInlineSRToggle(srRow, q);
+        addInlineSRToggle(srRow, q); // ajoute le bouton label + toggle
         const srBtn = srRow.querySelector("button");
         if (srBtn && srBtn.onclick) {
           srBtn.onclick.onChange = (now) => {
-            if (now === "off") {
-              // Re-enable the question immediately
-              q.skipped = false;
-              const sr = { ...(q.scheduleInfo?.sr || {}), on: false };
-              delete sr.due;
-              q.scheduleInfo = { ...(q.scheduleInfo || {}), sr };
+            console.log(`[SR] Toggle depuis MASQUÉ → ${now} | id=${q.id} "${q.label}"`);
+            if (now === "off") {                // devient visible
+              try {
+                q.skipped = false;              // ← clé pour la re-classe immédiate
+                const sr = Object.assign({}, q.scheduleInfo?.sr, { on:false });
+                if (sr.due) delete sr.due;      // on enlève l'échéance côté UI
+                q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr });
+              } catch {}
               renderQuestions(appState.lastQuestions);
+              // vérification post-render
+              setTimeout(() => {
+                const moved = !appState.qById.get(String(q.id))?.skipped;
+                console.log(`[SR] Résultat déplacement (masqué→visible) id=${q.id}: visible=${moved}`);
+              }, 0);
             }
           };
         }
-        // on ne garde que le bouton, pas le label
-        actions.appendChild(srRow.querySelector("button"));
+        // On n'affiche que le bouton (pas le label texte)
+        const onlyToggle = srRow.querySelector("button");
+        if (onlyToggle) actions.appendChild(onlyToggle);
 
-        // Modifier
+        // Modifier (gris)
         const edit = document.createElement("button");
         edit.type = "button";
-        edit.className = "text-blue-600 hover:underline";
+        edit.className = "text-gray-600 hover:underline";
         edit.textContent = "Modifier";
         edit.onclick = () => openConsigneModal({
           id:q.id, label:q.label, category:q.category, type:q.type||"Oui/Non",
@@ -1968,10 +1985,10 @@ async function initApp() {
         });
         actions.appendChild(edit);
 
-        // Supprimer
+        // Supprimer (rouge pastel)
         const del = document.createElement("button");
         del.type = "button";
-        del.className = "text-red-600 hover:underline";
+        del.className = "text-red-500 hover:text-red-600 hover:underline";
         del.textContent = "Supprimer";
         del.onclick = async () => {
           if (!confirm("Supprimer définitivement cette consigne ?")) return;
@@ -1981,9 +1998,14 @@ async function initApp() {
         };
         actions.appendChild(del);
 
-        // Add actions directly to the card
+        // attacher les actions
         card.appendChild(actions);
-        
+
+        // Historique : on utilise le composant standard (en gris) → un seul clic
+        if (Array.isArray(q.history) && q.history.length) {
+          renderHistory(q.history, card, normalize, colorMap);
+        }
+
         // Add card to the container
         inner.appendChild(card);
       });
