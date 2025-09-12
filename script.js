@@ -965,21 +965,15 @@ async function initApp() {
   
   // Flush immédiat du _softBuffer (POST "now")
   // Utilise le même contexte (_mode/_date ou _category) que queueSoftSave()
-  async function flushSoftSaveNow(extraPatch = null, anchorEl = null) {
+  async function flushSoftSaveNow(reason = "manual", qid = "") {
     try {
-      if (extraPatch && typeof extraPatch === 'object') {
-        Object.assign(_softBuffer, extraPatch);
-        if (anchorEl) _softAnchors.add(anchorEl);
-      }
-
-      // Rien à poster ?
       const keys = Object.keys(_softBuffer);
       if (!keys.length) return { ok: true, skipped: true };
 
       const selected = document.getElementById("date-select")?.selectedOptions[0];
       const mode = selected?.dataset.mode || "daily";
-
       const body = { apiUrl, user, ..._softBuffer };
+
       if (mode === "daily") { 
         body._mode = "daily"; 
         body._date = selected.dataset.date; 
@@ -988,19 +982,32 @@ async function initApp() {
         body._category = selected.dataset.category; 
       }
 
-      // Log ultra précis
-      console.log("[SR-FLUSH] POST → Worker", {
-        keys, 
-        bodyPreview: Object.fromEntries(keys.map(k=>[k, body[k]])), 
-        mode, 
+      console.log(`[SR-FLUSH] reason=${reason} id=${qid} → POST`, {
+        keys,
+        bodyPreview: Object.fromEntries(keys.map(k => [k, body[k]])),
+        mode,
         ts: Date.now()
       });
 
-      const res = await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
-      const ok = res.ok;
-
-      // Nettoyage buffer quoi qu'il arrive
+      // On vide le buffer AVANT le POST pour éviter un double envoi en cas de double-clic
       for (const k of keys) delete _softBuffer[k];
+
+      const response = await fetch(WORKER_URL, { 
+        method: "POST", 
+        body: JSON.stringify(body) 
+      });
+      
+      if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+      
+      console.log(`[SR-FLUSH] OK (${reason})`);
+      return { ok: true };
+    } catch (e) {
+      console.error("[SR-FLUSH] FAIL", e);
+      return { ok: false, error: e };
+    } finally {
+      const b = document.getElementById("__saving_badge__");
+      if (b) b.style.opacity = "0";
+    }
 
       if (ok) {
         _softAnchors.forEach(a => flashSaved(a));
@@ -1022,20 +1029,19 @@ async function initApp() {
   }
 
   function queueSoftSave(patchObj, anchorEl) {
-    console.log("queueSoftSave reçu:", patchObj);
-    const keys = Object.keys(patchObj || {});
-    Object.assign(_softBuffer, patchObj || {});
-    if (anchorEl) _softAnchors.add(anchorEl);
+    if (!patchObj || typeof patchObj !== 'object') return;
     
     // Log toggle actions for better debugging
-    if (patchObj && typeof patchObj === 'object') {
-      for (const [key, value] of Object.entries(patchObj)) {
-        if (key.startsWith('__srToggle__')) {
-          const qid = key.replace('__srToggle__', '');
-          console.log(`[SR] Toggle demandé → ${value} (qid=${qid}). Envoi…`);
-        }
+    for (const [key, value] of Object.entries(patchObj)) {
+      if (key.startsWith('__srToggle__')) {
+        const qid = key.replace('__srToggle__', '');
+        console.log(`[SR] Toggle demandé → ${value} (qid=${qid}). Envoi…`);
       }
     }
+    
+    // Update buffer and track anchor elements
+    Object.assign(_softBuffer, patchObj);
+    if (anchorEl) _softAnchors.add(anchorEl);
 
     const savingBadge = document.getElementById("__saving_badge__") || (() => {
       const b = document.createElement("div");
@@ -1803,14 +1809,20 @@ async function initApp() {
     const lastChild = wrapper.lastElementChild; // la ligne SR ajoutée
     const toggleBtn = lastChild?.querySelector('button');
     if (toggleBtn && toggleBtn.onclick) {
-      toggleBtn.onclick.onChange = (now) => {
+      toggleBtn.onclick.onChange = async (now) => {
         if (now === "on") {
           console.log(`[SR-GATE] VISIBLE → ON (id=${q.id}, "${q.label}") — on NE masque PAS côté front; on laisse le back décider (streak).`);
           try {
+            // Mise à jour locale
             const sr = Object.assign({}, q.scheduleInfo?.sr, { on: true });
-            // On ne fixe PAS due/skipped côté front
-            if (sr.due) delete sr.due; // facultatif: laisser le back recalculer proprement
+            delete sr.due; // On laisse le back recalculer
             q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr });
+            
+            // Envoi immédiat au back
+            await flushSoftSaveNow("VISIBLE_TO_ON", q.id);
+            
+            // Re-render pour s'assurer que l'UI est à jour
+            renderQuestions(appState.lastQuestions);
           } catch (e) {
             console.error("[SR-ERROR] Toggle ON error:", e);
           }
@@ -2110,6 +2122,7 @@ async function initApp() {
           toggleBtn.onclick.onChange = async (now) => {
             console.log(`[SR-TOGGLE] MASQUÉ → ${now} | id=${q.id} "${q.label}"`);
             if (now === "off") {
+              // 1) Envoi immédiat au back
               const patch = {
                 [`__srToggle__${q.id}`]: "off",
                 [`__srClear__${q.id}`]: 1
