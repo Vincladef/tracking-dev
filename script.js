@@ -17,6 +17,26 @@ function normalizeFRDate(raw) {
   return s;
 }
 
+function toISODate(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  // dd/MM/yyyy -> yyyy-MM-dd
+  if (s.includes("/")) {
+    const [dd, mm, yyyy] = s.split("/");
+    if (dd && mm && yyyy) {
+      return `${String(yyyy).padStart(4,'0')}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+    }
+  }
+  // yyyy-MM-dd -> yyyy-MM-dd (déjà ISO)
+  if (s.includes("-")) {
+    const [y, m, d] = s.split("-");
+    if (y && m && d) {
+      return `${String(y).padStart(4,'0')}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    }
+  }
+  return null;
+}
+
 async function apiFetch(method, pathOrParams, opts = {}) {
   if (method !== "GET") throw new Error("apiFetch() n'est utilisé ici que pour GET");
   let query = pathOrParams || "";
@@ -499,13 +519,18 @@ async function initApp() {
   function handleSelectChange() {
     // on repart propre à chaque changement
     appState.delayValues = {};
-    appState.srToggles   = {};
-    appState.srBaseline  = {};
-
+    appState.srToggles = {};
+    appState.srBaseline = {};
+    
     const sel = document.getElementById("date-select");
     if (!sel || !sel.selectedOptions.length) return;
     const selected = sel.selectedOptions[0];
     const mode = selected.dataset.mode || "daily";
+
+    // ✨ garde l'état courant pour les filtres front (SR / pratique)
+    appState.mode = mode;
+    appState.selectedDate = (mode === "daily") ? selected.dataset.date : null;
+
     if (mode === "daily") {
       console.log(`➡️ Changement de mode : Journalier, date=${selected.dataset.date}`);
       loadFormForDate(selected.dataset.date);
@@ -1592,18 +1617,15 @@ async function initApp() {
     header.appendChild(actions);
     wrapper.appendChild(header);
 
-    // Pré-remplissage en mode journalier (si history contient la date sélectionnée)
+    // Pré-remplissage en mode journalier (si une réponse existe pour la date sélectionnée)
     let referenceAnswer = "";
-    if (q.history && Array.isArray(q.history)) {
+    if (Array.isArray(q.history)) {
       const dateISO = document.getElementById("date-select").selectedOptions[0]?.dataset.date;
       if (dateISO) {
-        const entry = q.history.find(entry => {
-          if (entry?.date) {
-            const [dd, mm, yyyy] = entry.date.split("/");
-            const entryDateISO = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-            return entryDateISO === dateISO;
-          }
-          return false;
+        const entry = q.history.find(h => {
+          // le back peut envoyer date en yyyy-MM-dd ; parfois "key" contient aussi une date lisible
+          const iso = toISODate(h?.date) || toISODate(h?.key);
+          return iso === dateISO;
         });
         referenceAnswer = entry?.value || "";
       }
