@@ -1858,10 +1858,34 @@ async function initApp() {
     appState.qById = new Map((questions||[]).map(q => [String(q.id), q]));
     appState.lastQuestions = questions.slice();
 
-    // 1) Séparer visibles / masquées (SR)
+    // 1) Séparer visibles / masquées (SR) — si SR=OFF, JAMAIS masquée
     const hiddenSR = [];
     const visibles = [];
-    filteredQuestions.forEach(q => q.skipped ? hiddenSR.push(q) : visibles.push(q));
+
+    filteredQuestions.forEach(q => {
+      const sr = (q?.scheduleInfo?.sr) || {};
+      const srOn   = !!sr.on;
+      const dueIso = sr?.due;
+      const iso    = appState.selectedDate; // YYYY-MM-DD en mode daily
+
+      // ⚖️ Règle de cohérence : SR OFF => visible, même si skipped=true venu du back
+      if (!srOn) {
+        if (q.skipped) {
+          console.warn(`[SR] Incohérence back: skipped=true alors que SR=OFF → forcé VISIBLE (id=${q.id}, "${q.label}")`);
+        }
+        q.skipped = false; // on normalise côté UI
+        visibles.push(q);
+        return;
+      }
+
+      // SR ON : masquée si flagged OU si une échéance future la masque aujourd'hui
+      let isHidden = !!q.skipped;
+      if (!isHidden && iso && dueIso && iso < dueIso) isHidden = true;
+
+      (isHidden ? hiddenSR : visibles).push(q);
+
+      console.log(`[SR] Classif id=${q.id} "${q.label}" → ${isHidden ? 'HIDDEN' : 'VISIBLE'} | srOn=${srOn} skipped=${!!q.skipped} due=${dueIso||'-'} date=${iso||'-'}`);
+    });
 
     // 2) Grouper les visibles par priorité
     const groups = { 1: [], 2: [], 3: [] }; // 1=haute,2=moyenne,3=basse
