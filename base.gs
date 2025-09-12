@@ -51,20 +51,13 @@ function fromISO_(iso){ // "YYYY-MM-DD" -> Date (00:00:00)
   return new Date(y, (m||1)-1, d||1, 0,0,0,0);
 }
 
-function norm_(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
-function isPractice_(freq){ const f=norm_(freq); return f.includes('pratique deliberee') || f.includes('pratique délibérée'); }
-function isArchived_(freq){ return norm_(freq).includes('archiv'); }
+function norm_(s){ return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim(); }
+function isPractice_(freq){ return /pratique\s*deliberee/.test(norm_(freq)); }
+function isArchived_(freq){ return /archiv/.test(norm_(freq)); }
 function dayNameFrFromISO_(iso){
   const d = fromISO_(iso);
-  return ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'][d.getDay()];
-}
-function includeInDaily_(consigne, dateISO){
-  const f = norm_(consigne.frequency);
-  if (!f || isArchived_(f)) return false;
-  if (isPractice_(f)) return false;             // ← exclure la pratique du journalier
-  if (f.includes('quotidien')) return true;     // ← quotidien
-  const day = dayNameFrFromISO_(dateISO);
-  return f.includes(day);                       // ← lundi, mardi, ...
+  const DAYS = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+  return DAYS[d.getDay()];
 }
 
 function now_(){ return new Date(); }
@@ -148,15 +141,17 @@ function formatFr_(iso){ // "YYYY-MM-DD" -> "dd/MM/yyyy"
 function buildQuestion_(consigne, sch, answersForId, ctx){
   const history = (answersForId||[])
     .map(a => ({ value: a.value, date: asISO_(a.date) }))
-    .sort((a,b) => a.date < b.date ? 1 : (a.date > b.date ? -1 : 0)); // récent -> ancien
+    .sort((a,b) => a.date < b.date ? 1 : (a.date > b.date ? -1 : 0));
   const srOn = String(consigne.sr||'')==='on';
-  const unit = (sch?.unit==='iters') ? 'iters' : 'days';
-  const nextDate = (unit==='days' && sch?.dueISO) ? formatFr_(sch.dueISO) : null;
+
+  const unit   = (sch?.unit==='iters') ? 'iters' : 'days';
+  const dueIso = asISO_(sch?.dueISO); // <-- canonise (gère Date ou string)
+  const nextDate = (unit==='days' && dueIso) ? formatFr_(dueIso) : null;
   const remaining = (unit==='iters') ? Number(sch?.remaining||0) : 0;
 
   let skipped = false;
-  if (ctx.mode==='daily' && sch?.dueISO) {
-    skipped = String(ctx.dateISO) < String(sch.dueISO);
+  if (ctx.mode==='daily' && dueIso) {
+    skipped = String(ctx.dateISO) < String(dueIso);
   }
   if (ctx.mode==='practice' && remaining>0) skipped = true;
 
@@ -170,7 +165,7 @@ function buildQuestion_(consigne, sch, answersForId, ctx){
     history,
     scheduleInfo: {
       unit, nextDate, remaining,
-      sr: { on: srOn, n: Number(sch?.n||0), interval: Number(sch?.interval||0), due: sch?.dueISO||null }
+      sr: { on: srOn, n: Number(sch?.n||0), interval: Number(sch?.interval||0), due: dueIso||null }
     },
     skipped
   };
@@ -198,11 +193,12 @@ function doGet(e){
   // PRACTICE: catégories OU consignes d'une catégorie
   if (p.mode === 'practice') {
     if (p.category) {
-      // Retourne les questions enrichies pour une catégorie spécifique
+      // Retourne les questions enrichies pour une catégorie spécifique (uniquement pratique délibérée)
       const cons = readRows_(T_CONSIGNES)
         .filter(r => String(r.user||'').toLowerCase() === user)
         .filter(r => String(r.status||'active') === 'active')
-        .filter(r => String(r.category||'') === String(p.category||''));
+        .filter(r => String(r.category||'') === String(p.category||''))
+        .filter(r => isPractice_(r.frequency) && !isArchived_(r.frequency));
       
       const schMap = readSchedule_(user);
       const ans = readRows_(T_ANSWERS).filter(a => String(a.user||'').toLowerCase() === user);
@@ -217,10 +213,11 @@ function doGet(e){
       const out = cons.map(r => buildQuestion_(r, schMap.get(String(r.id)), byId.get(String(r.id)), { mode: 'practice' }));
       return json_({ consignes: out });
     } else {
-      // Retourne uniquement la liste des catégories
+      // Retourne uniquement la liste des catégories avec des consignes en pratique délibérée
       const rows = readRows_(T_CONSIGNES)
         .filter(r => String(r.user||'').toLowerCase() === user)
-        .filter(r => String(r.status||'active') === 'active');
+        .filter(r => String(r.status||'active') === 'active')
+        .filter(r => isPractice_(r.frequency) && !isArchived_(r.frequency));
       
       const cats = [...new Set(
         rows.map(r => String(r.category||'').trim())
@@ -233,10 +230,18 @@ function doGet(e){
   // JOURNALIER: consignes + réponses existantes pour une date
   if (p.date) {
     const dateISO = String(p.date);
+    const dayName = dayNameFrFromISO_(dateISO); // "lundi"..."dimanche"
+
     const cons = readRows_(T_CONSIGNES)
       .filter(r => String(r.user||'').toLowerCase() === user)
       .filter(r => String(r.status||'active') === 'active')
-      .filter(r => includeInDaily_(r, dateISO)); // ← filter by frequency/day & exclude practice
+      // 1) exclure "pratique délibérée" et "archivé"
+      .filter(r => !isPractice_(r.frequency) && !isArchived_(r.frequency))
+      // 2) garder seulement "Quotidien" OU le jour correspondant
+      .filter(r => {
+        const f = norm_(r.frequency);
+        return f.includes('quotidien') || f.includes(dayName);
+      });
     
     const schMap = readSchedule_(user);
     const ans = readRows_(T_ANSWERS)

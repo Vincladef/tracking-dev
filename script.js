@@ -243,7 +243,7 @@ async function initApp() {
     ph.textContent = "Choisis une date ou un mode pratique…";
     sel.appendChild(ph);
 
-    // Groupe Dates
+    // Groupe Dates (7j)
     const ogDates = document.createElement("optgroup");
     ogDates.label = "Dates (7 derniers jours)";
     const pastDates = [...Array(7)].map((_, i) => {
@@ -262,47 +262,41 @@ async function initApp() {
     });
     sel.appendChild(ogDates);
 
-    // Mode pratique — catégories
+    // Groupe Mode pratique — catégories (chargé IMMÉDIATEMENT)
     const ogPractice = document.createElement("optgroup");
     ogPractice.label = "Mode pratique — catégories";
     sel.appendChild(ogPractice);
 
-    // Charge immédiatement les catégories de pratique
-    async function loadPracticeCatsOnce() {
-      try {
-        const resp = await apiFetch("GET", `?mode=practice`);
-        const cats = Array.isArray(resp) ? resp : (resp?.categories || []);
-        if (cats.length) {
-          // insère un séparateur visuel
-          const sepGroup = document.createElement("optgroup");
-          sepGroup.label = "────────";
-          sel.appendChild(sepGroup);
+    try {
+      const resp = await apiFetch("GET", `?mode=practice`);
+      const cats = Array.isArray(resp) ? resp : (resp?.categories || []);
+      if (cats.length) {
+        const sepGroup = document.createElement("optgroup");
+        sepGroup.label = "────────";
+        sel.appendChild(sepGroup);
 
-          cats.forEach(cat => {
-            const o = document.createElement("option");
-            o.textContent = `Mode pratique — ${cat}`;
-            o.dataset.mode = "practice";
-            o.dataset.category = cat;
-            ogPractice.appendChild(o);
-          });
-        } else {
-          ogPractice.label = "Mode pratique — (aucune catégorie)";
-        }
-      } catch (e) {
-        console.warn("Impossible de charger les catégories de pratique", e);
-        ogPractice.label = "Mode pratique — (erreur)";
+        cats.forEach(cat => {
+          const o = document.createElement("option");
+          o.textContent = `Mode pratique — ${cat}`;
+          o.dataset.mode = "practice";
+          o.dataset.category = cat;
+          ogPractice.appendChild(o);
+        });
+      } else {
+        ogPractice.label = "Mode pratique — (aucune catégorie)";
       }
+    } catch (e) {
+      console.warn("Impossible de charger les catégories de pratique", e);
+      ogPractice.label = "Mode pratique — (erreur)";
     }
-    
-    // Charge les catégories immédiatement
-    await loadPracticeCatsOnce();
 
-    // Sélectionner automatiquement la première date
+    // Sélection par défaut : 1ère date
     const firstDate = ogDates.querySelector("option");
     if (firstDate) {
       ph.selected = false;
       firstDate.selected = true;
     }
+    console.log("✅ Sélecteur prêt.");
     console.log("✅ Sélecteur de mode et de date prêt.");
   }
 
