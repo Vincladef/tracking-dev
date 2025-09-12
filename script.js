@@ -419,6 +419,9 @@ async function initApp() {
     const srFromBack = q?.scheduleInfo?.sr;
     const hasBackValue = !!(srFromBack && typeof srFromBack.on === 'boolean');
 
+    // Initialize appState if needed
+    if (!appState.__srHardOff) appState.__srHardOff = new Set();
+
     // état affiché = ce que dit le back si présent, sinon OFF par défaut
     const currentOn = hasBackValue
       ? !!srFromBack.on
@@ -428,8 +431,6 @@ async function initApp() {
     if (!(q.id in appState.srToggles)) appState.srToggles[q.id] = currentOn ? "on" : "off";
 
     console.log(`[SR] UI toggle id=${q.id} "${q.label || ''}" → ${appState.srToggles[q.id]} (baseline=${appState.srBaseline[q.id]})`);
-
-    // ⛔️ PAS d'auto-push ici : on ne force plus "on" si le back est silencieux.
 
     const row = document.createElement("div");
     row.className = "flex items-center gap-2";
@@ -451,13 +452,39 @@ async function initApp() {
 
     btn.onclick = () => {
       const now = (appState.srToggles[q.id] === "on") ? "off" : "on";
+      
+      // Update local state
       appState.srToggles[q.id] = now;
+      
+      // Track hard-off state for auditing
+      if (now === "off") {
+        appState.__srHardOff.add(String(q.id));
+      } else {
+        appState.__srHardOff.delete(String(q.id));
+      }
+      
+      console.log(`[SR-AUDIT] TOGGLE UI id=${q.id} "${q.label}" now=${now} | hardOffSet=${JSON.stringify(Array.from(appState.__srHardOff))}`);
+      
+      // Send update with clear flag when turning off
+      const update = { ["__srToggle__" + q.id]: now };
+      if (now === "off") {
+        update["__srClear__" + q.id] = 1;  // Add clear flag when turning off
+      }
+      
+      queueSoftSave(update, row);
       paint();
-      queueSoftSave({ ["__srToggle__" + q.id]: now }, row);
       flashSaved(row);
-      if (typeof btn.onclick.onChange === "function") btn.onclick.onChange(now);
+      
+      if (typeof btn.onclick.onChange === "function") {
+        btn.onclick.onChange(now);
+      }
     };
     btn.onclick.onChange = null;
+
+    // Initialize hard-off tracking if needed
+    if (appState.srToggles[q.id] === "off") {
+      appState.__srHardOff.add(String(q.id));
+    }
 
     paint();
     row.appendChild(label);
@@ -544,8 +571,11 @@ async function initApp() {
   }
 
   // 📨 Soumission
-  document.getElementById("submitBtn").addEventListener("click", (e) => {
+  document.getElementById("submitBtn").addEventListener("click", async (e) => {
     e.preventDefault();
+
+    // Flush any pending auto-save operations before proceeding with submission
+    await flushSoftSaveNow("before-submit");
 
     const form = document.getElementById("daily-form");
     const formData = new FormData(form);
@@ -1833,6 +1863,9 @@ async function initApp() {
     container.innerHTML = "";
     console.log(`✍️ Rendu de ${questions.length} question(s)`);
 
+    // Initialize SR hard-off tracking if needed
+    if (!appState.__srHardOff) appState.__srHardOff = new Set();
+
     // Sécurité : en journalier, on vire la "pratique délibérée"
     let filteredQuestions = (questions || []);
     
@@ -1844,9 +1877,34 @@ async function initApp() {
       const iso = appState.selectedDate; // format YYYY-MM-DD
       if (iso) {
         filteredQuestions.forEach(q => {
-          const sr = q?.scheduleInfo?.sr;
+          const sr = q?.scheduleInfo?.sr || {};
           const dueIso = sr?.due;
-          const srOn = sr?.on;
+          const srOn = !!sr.on;
+          
+          // Audit: Check if backend SR state matches our hard-off tracking
+          const isHardOff = appState.__srHardOff.has(String(q.id));
+          if (isHardOff && srOn) {
+            console.warn(`[SR-AUDIT] Incohérence détectée: SR BACK=ON mais FRONT=OFF (id=${q.id}, "${q.label}") → Forçage OFF`);
+            // Queue a correction to force SR off in the backend
+            queueSoftSave({
+              [`__srToggle__${q.id}`]: "off",
+              [`__srClear__${q.id}`]: 1
+            });
+            
+            // Update local state to match
+            if (appState.srToggles[q.id] !== "off") {
+              appState.srToggles[q.id] = "off";
+              console.log(`[SR-AUDIT] Mise à jour locale: id=${q.id} → OFF`);
+            }
+            
+            // Clear any skipped state since SR is off
+            q.skipped = false;
+          } else if (isHardOff && q.skipped) {
+            console.warn(`[SR-AUDIT] Incohérence: skipped=true mais SR=OFF (id=${q.id}, "${q.label}") → Forçage skipped=false`);
+            q.skipped = false;
+          }
+          
+          // Original skipped state handling
           if (!q.skipped && srOn && dueIso && iso < dueIso) {
             q.skipped = true; // on masque aujourd'hui
           }
