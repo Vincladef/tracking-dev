@@ -262,24 +262,22 @@ async function initApp() {
     });
     sel.appendChild(ogDates);
 
-    // Lazy-load Mode pratique — catégories
+    // Mode pratique — catégories
     const ogPractice = document.createElement("optgroup");
-    ogPractice.label = "Mode pratique — catégories (charger…)";
+    ogPractice.label = "Mode pratique — catégories";
     sel.appendChild(ogPractice);
 
-    let _catsLoaded = false;
+    // Charge immédiatement les catégories de pratique
     async function loadPracticeCatsOnce() {
-      if (_catsLoaded) return; _catsLoaded = true;
       try {
         const resp = await apiFetch("GET", `?mode=practice`);
         const cats = Array.isArray(resp) ? resp : (resp?.categories || []);
         if (cats.length) {
-          // insère un séparateur visuel au moment du chargement
+          // insère un séparateur visuel
           const sepGroup = document.createElement("optgroup");
           sepGroup.label = "────────";
           sel.appendChild(sepGroup);
 
-          ogPractice.label = "Mode pratique — catégories";
           cats.forEach(cat => {
             const o = document.createElement("option");
             o.textContent = `Mode pratique — ${cat}`;
@@ -295,9 +293,9 @@ async function initApp() {
         ogPractice.label = "Mode pratique — (erreur)";
       }
     }
-    // charge à la première interaction seulement
-    sel.addEventListener("mousedown", loadPracticeCatsOnce, { once: true });
-    sel.addEventListener("focus",     loadPracticeCatsOnce, { once: true });
+    
+    // Charge les catégories immédiatement
+    await loadPracticeCatsOnce();
 
     // Sélectionner automatiquement la première date
     const firstDate = ogDates.querySelector("option");

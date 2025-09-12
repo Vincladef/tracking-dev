@@ -51,6 +51,22 @@ function fromISO_(iso){ // "YYYY-MM-DD" -> Date (00:00:00)
   return new Date(y, (m||1)-1, d||1, 0,0,0,0);
 }
 
+function norm_(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
+function isPractice_(freq){ const f=norm_(freq); return f.includes('pratique deliberee') || f.includes('pratique délibérée'); }
+function isArchived_(freq){ return norm_(freq).includes('archiv'); }
+function dayNameFrFromISO_(iso){
+  const d = fromISO_(iso);
+  return ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'][d.getDay()];
+}
+function includeInDaily_(consigne, dateISO){
+  const f = norm_(consigne.frequency);
+  if (!f || isArchived_(f)) return false;
+  if (isPractice_(f)) return false;             // ← exclure la pratique du journalier
+  if (f.includes('quotidien')) return true;     // ← quotidien
+  const day = dayNameFrFromISO_(dateISO);
+  return f.includes(day);                       // ← lundi, mardi, ...
+}
+
 function now_(){ return new Date(); }
 function todayYMD_(){ return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'); }
 
@@ -219,7 +235,8 @@ function doGet(e){
     const dateISO = String(p.date);
     const cons = readRows_(T_CONSIGNES)
       .filter(r => String(r.user||'').toLowerCase() === user)
-      .filter(r => String(r.status||'active') === 'active');
+      .filter(r => String(r.status||'active') === 'active')
+      .filter(r => includeInDaily_(r, dateISO)); // ← filter by frequency/day & exclude practice
     
     const schMap = readSchedule_(user);
     const ans = readRows_(T_ANSWERS)
@@ -344,8 +361,10 @@ function doPost(e){
     const schMap = readSchedule_(user); // Map id -> row
 
     for (const [k,v] of Object.entries(body)) {
-      // On ne considère que les clés "qid" (alphanumériques), pas les __*
-      if (!/^[a-zA-Z0-9_-]+$/.test(k)) continue;
+      // Ignore meta/commandes (_... , __...)
+      if (k.startsWith('_') || k.startsWith('__')) continue;
+      // id de question attendu: commence par lettre/chiffre, puis [A-Za-z0-9_-]
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(k)) continue;
 
       const cons = consById.get(String(k));
       if (!cons) continue;
