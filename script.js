@@ -416,59 +416,56 @@ async function initApp() {
   }
 
   function addInlineSRToggle(container, q, opts = {}) {
-    const wrapper = document.createElement("div");
-    wrapper.className = "flex items-center gap-2";
-    
-    // Get current SR state with fallbacks
-    const srCurrent = q.scheduleInfo?.sr || {};
-    const hasSrFromBackend = srCurrent.on !== undefined;
-    const now = hasSrFromBackend ? (srCurrent.on ? "on" : "off") : (appState.srToggles[q.id] || "off");
-    
-    // Update appState if needed
-    if (hasSrFromBackend) {
-      appState.srToggles[q.id] = now;
-    } else if (!appState.srBaseline[q.id]) {
-      // If no SR info from backend and no baseline, auto-push "on"
+    const srCurrent = q.scheduleInfo?.sr || { on: true }; // ON par défaut si inconnu
+    const hasSrFromBackend = !!(q.scheduleInfo && Object.prototype.hasOwnProperty.call(q.scheduleInfo, "sr"));
+
+    if (!(q.id in appState.srBaseline)) appState.srBaseline[q.id] = srCurrent.on ? "on" : "off";
+    if (!(q.id in appState.srToggles)) appState.srToggles[q.id] = srCurrent.on ? "on" : "off";
+
+    // Auto-push si le back n'a pas d'info mais l'UI est ON par défaut
+    if (!hasSrFromBackend && srCurrent.on && !appState.__srAutoPushed?.[q.id]) {
+      if (!appState.__srAutoPushed) appState.__srAutoPushed = {};
+      appState.__srAutoPushed[q.id] = true;
+      console.log(`[SR] Auto-push initial ON (back manquant) id=${q.id}`);
+      queueSoftSave({ ["__srToggle__" + q.id]: "on" }, container);
       appState.srBaseline[q.id] = "on";
       appState.srToggles[q.id] = "on";
-      if (!hasSrFromBackend) {
-        console.log(`[SR] Auto-push initial ON (back manquant) id=${q.id}`);
-        // Queue up the toggle to be sent to the server
-        setTimeout(() => apiFetch("POST", `__srToggle__${q.id}=on`).catch(console.error), 0);
-      }
     }
-    
-    console.log(`[SR] UI toggle id=${q.id} "${q.label || ''}" → ${now} (baseline=${appState.srBaseline[q.id]})`);
-    
+
+    console.log(`[SR] UI toggle id=${q.id} "${q.label || ''}" → ${appState.srToggles[q.id]} (baseline=${appState.srBaseline[q.id]})`);
+
     const row = document.createElement("div");
-    row.className = "mt-2 flex items-center gap-3";
+    row.className = "flex items-center gap-2";
+  
     const label = document.createElement("span");
     label.className = "text-sm text-gray-700";
     label.textContent = "Répétition espacée (délai auto) :";
+  
     const btn = document.createElement("button");
     btn.type = "button";
-    const paint = ()=>{
+
+    const paint = () => {
       const on = appState.srToggles[q.id] === "on";
       btn.textContent = on ? "ON" : "OFF";
-      btn.className = "px-2 py-1 rounded border text-sm " + (on ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-700 border-gray-200");
+      btn.className = "px-2 py-1 rounded border text-sm " + (on
+        ? "bg-green-50 text-green-700 border-green-200"
+        : "bg-gray-50 text-gray-700 border-gray-200");
     };
-    btn.onclick = ()=>{
+
+    btn.onclick = () => {
       const now = (appState.srToggles[q.id] === "on") ? "off" : "on";
       appState.srToggles[q.id] = now;
       paint();
       queueSoftSave({ ["__srToggle__" + q.id]: now }, row);
       flashSaved(row);
-      // 👇 appel optionnel (pour re-rendu immédiat)
-      if (typeof arguments.callee.onChange === "function") {
-        arguments.callee.onChange(now);
-      }
+      if (typeof btn.onclick.onChange === "function") btn.onclick.onChange(now);
     };
-    // expose un setter juste après la définition de btn.onclick
-    btn.onclick.onChange = null; // valeur par défaut
+    btn.onclick.onChange = null;
+
     paint();
     row.appendChild(label);
     row.appendChild(btn);
-    wrapper.appendChild(row);
+    container.appendChild(row);
   }
 
   // Ordonne l'historique pour l'affichage en liste: RÉCENT -> ANCIEN
@@ -1238,32 +1235,37 @@ async function initApp() {
           const winner = await Promise.race([pCreate, slowGuard]);
 
           if (winner === "__timeout__") {
-            // On ne bloque pas l'UX
             showToast("⏳ Enregistrement en arrière-plan…", "blue");
             closeConsigneModal();
             restore();
-            // Quand ça finit, on fait le reste
-            pCreate.then(({ok,newId})=>{
+
+            pCreate.then(({ ok, newId }) => {
               if (ok) {
-                } catch {}
+                console.log(`[CONS] Créée id=${newId}. SR demandé=${getSR() ? 'ON' : 'OFF'}`);
+                if (getSR() && newId) {
+                  try {
+                    const selected = document.getElementById("date-select")?.selectedOptions[0];
+                    const mode = selected?.dataset.mode || "daily";
+                    const body = { apiUrl, user, ["__srToggle__"+newId]: "on" };
+                    if (mode === "daily") { body._mode="daily"; body._date=selected.dataset.date; }
+                    else { body._mode="practice"; body._category=selected.dataset.category; }
+                    fetch(WORKER_URL, { method:"POST", body: JSON.stringify(body) });
+                  } catch (e) { console.warn("SR post failed", e); }
+                }
+                refreshCurrentView(true);
+                setTimeout(() => {
+                  const q = appState.qById?.get(String(newId));
+                  console.log(`[CONS] Vérif post-création id=${newId}: srOnUI=${q?.scheduleInfo?.sr?.on ? 'ON' : 'OFF'} skipped=${!!q?.skipped}`);
+                }, 400);
+                showToast("✅ Consigne créée");
+              } else {
+                showToast("❌ Échec de création", "red");
               }
-              refreshCurrentView(true);
-              setTimeout(()=> {
-                // petit check visuel après rechargement
-                const q = appState.qById?.get(String(newId));
-                console.log(`[CONS] Vérif post-création id=${newId}: srOnUI=${q?.scheduleInfo?.sr?.on ? 'ON' : 'OFF'} skipped=${!!q?.skipped}`);
-              }, 400);
-              showToast("✅ Consigne créée");
-              modal.classList.add("hidden");
-            } else {
-              showToast("❌ Erreur lors de la création", "red");
-              isSubmitting = false;
-            }
-          }).catch(e => {
-            console.error(e);
-            showToast("❌ Erreur lors de la création", "red");
-            isSubmitting = false;
-          });return; // on a déjà fermé
+            }).catch(e => {
+              console.error(e);
+              showToast("❌ Échec de création", "red");
+            });
+            return; // on a déjà fermé
           }
 
           // Si on est ici, la création a répondu vite
