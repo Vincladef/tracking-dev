@@ -176,47 +176,43 @@ function parseSrIterDec_(raw) {
   }
 }
 
-// Decrémente et retourne des détails {id, before, after}
+// Decrémente et retourne des détails {id, before, after} (et UNLOGs clairs)
 function srTickIterations_(user, ids) {
   if (!ids || !ids.length) return [];
 
-  const ss = SS();
-  const sheet = ss.getSheetByName(T_CONSIGNES);
+  const sheet = SS().getSheetByName(T_CONSIGNES);
   const data = sheet.getDataRange().getValues();
   const header = data[0] || [];
 
   const colIdx = {
     id:           header.findIndex(h => String(h).toLowerCase() === 'id'),
     user:         header.findIndex(h => String(h).toLowerCase() === 'user'),
-    sr:           header.findIndex(h => String(h).toLowerCase() === 'sr'),            // "on"/"off"
-    srUnit:       header.findIndex(h => String(h).toLowerCase() === 'sr_unit'),       // "iters"/"days"
-    srRemaining:  header.findIndex(h => String(h).toLowerCase() === 'sr_remaining'),  // nombre restant
-    skipped:      header.findIndex(h => String(h).toLowerCase() === 'skipped'),       // masqué ?
+    sr:           header.findIndex(h => String(h).toLowerCase() === 'sr'),
+    srUnit:       header.findIndex(h => String(h).toLowerCase() === 'sr_unit'),
+    srRemaining:  header.findIndex(h => String(h).toLowerCase() === 'sr_remaining'),
+    skipped:      header.findIndex(h => String(h).toLowerCase() === 'skipped'),
     updatedAt:    header.findIndex(h => String(h).toLowerCase() === 'updatedat'),
   };
-
-  // Colonnes minimales requises
   if ([colIdx.id, colIdx.user, colIdx.sr, colIdx.srUnit, colIdx.srRemaining].some(i => i < 0)) {
     Logger.log('[SR][DEC] Colonnes manquantes dans CONSIGNES');
     return [];
   }
 
-  const want = new Set(ids.map(String));
+  const target = new Set(ids.map(String));
   const details = [];
 
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     const rowUser = String(row[colIdx.user] || '').toLowerCase();
     const rowId   = String(row[colIdx.id]   || '');
-    if (rowUser !== user || !want.has(rowId)) continue;
+    if (rowUser !== user || !target.has(rowId)) continue;
 
-    const srOn    = String(row[colIdx.sr] || '').toLowerCase() === 'on';
-    const srUnit  = String(row[colIdx.srUnit] || '').toLowerCase();
-    let   before  = Number(row[colIdx.srRemaining] || 0);
+    const srOn   = String(row[colIdx.sr] || '').toLowerCase() === 'on';
+    const srUnit = String(row[colIdx.srUnit] || '').toLowerCase();
+    let before   = Number(row[colIdx.srRemaining] || 0);
 
     if (srOn && srUnit === 'iters' && before > 0) {
       const after = Math.max(0, before - 1);
-
       row[colIdx.srRemaining] = after;
       if (after <= 0 && colIdx.skipped >= 0) row[colIdx.skipped] = ''; // redevient visible
       if (colIdx.updatedAt >= 0) row[colIdx.updatedAt] = now_();
@@ -225,11 +221,11 @@ function srTickIterations_(user, ids) {
 
       details.push({ id: rowId, before: before, after: after });
       Logger.log('[SR][DEC] id=%s %s→%s (user=%s)', rowId, before, after, user);
-      console.log(`[SR] Decremented iterations for id=${rowId}, remaining=${remaining}`);
     }
   }
-  
-  return updatedCount;
+
+  Logger.log('[SR][DEC] total=%s item(s) décrémenté(s) pour user=%s', details.length, user);
+  return details;
 }
 
 // Fallback function to decrement all skipped items in a category
@@ -673,96 +669,22 @@ function doPost(e) {
           unit:'days', n, interval,
           dueISO: addDays_(baseDateISO, interval),
           remaining:''
-        });
-      } else { // practice
         if (L>=4) n+=1; else if (L===3) n+=0.5; else n=0;
         const interval = Math.floor(n);
-        upsertSchedule_(user, k, {
-          unit:'iters', n, interval,
-          remaining: interval,
-          dueISO:''
-        });
+        upsertSchedule_(user, k, { unit:'iters', n, interval, remaining: interval, dueISO: '' });
+        Logger.log('[SR][AUTO][PRACTICE] id=%s n=%s remaining=%s', k, n, interval);
       }
     }
 
-    return json_({ saved: entries.length, srToggled: srToggles.length });
+    return json_({
+      ok: true,
+      saved: savedCount,
+      srDec: out.srDec,
+      daily: out.daily,
+      srToggled: srTogglesKeys.length
+    });
+  } catch (err) {
+    Logger.log('[POST][ERROR] %s', err && err.stack || err);
+    return json_({ ok:false, error: String(err) });
   }
-
-  // 2) CRUD consignes
-  if (body._action === 'consigne_create') {
-    const id = body.id || ('c_' + Utilities.getUuid().slice(0,8));
-    const row = [
-      user,
-      id,
-      body.label || '',
-      body.category || '',
-      body.type || 'text',
-      Number(body.priority || 2),
-      body.frequency || '',
-      (body.sr ? 'on' : (body.sr === false ? 'off' : '')),             // sr (texte)
-      body.extra ? (typeof body.extra === 'string' ? body.extra : JSON.stringify(body.extra)) : '',
-      now_(), now_(),
-      'active'
-    ];
-    append_(T_CONSIGNES, [row]);
-    return json_({ ok:true, id });
-  }
-
-  if (body._action === 'consigne_update') {
-    const data = readRaw_(T_CONSIGNES);
-    const H = data.header.map(h=>String(h||'').trim());
-    const iU=H.indexOf('user'), iId=H.indexOf('id'), iUpd=H.indexOf('updatedAt');
-    const upKeys = ['label','category','type','priority','frequency','sr','extra','status'];
-
-    for (let i=0;i<data.rows.length;i++){
-      const r = data.rows[i];
-      if (String(r[iU]||'').toLowerCase()===user && String(r[iId])===String(body.id)){
-        for (const k of upKeys){
-          const idx = H.indexOf(k); if (idx<0 || body[k]===undefined) continue;
-          r[idx] = (k==='extra' && typeof body[k]!=='string') ? JSON.stringify(body[k]) : body[k];
-        }
-        if (iUpd>=0) r[iUpd]=now_();
-        data.rows[i]=r; break;
-      }
-    }
-    writeAll_(T_CONSIGNES, data.header, data.rows);
-    return json_({ ok:true });
-  }
-
-  if (body._action === 'consigne_delete') {
-    const data = readRaw_(T_CONSIGNES);
-    const H = data.header.map(h=>String(h||'').trim());
-    const iU=H.indexOf('user'), iId=H.indexOf('id'), iSt=H.indexOf('status'), iUpd=H.indexOf('updatedAt');
-
-    for (let i=0;i<data.rows.length;i++){
-      const r = data.rows[i];
-      if (String(r[iU]||'').toLowerCase()===user && String(r[iId])===String(body.id)){
-        if (iSt>=0) r[iSt] = 'deleted';
-        if (iUpd>=0) r[iUpd]=now_();
-        data.rows[i]=r; break;
-      }
-    }
-    writeAll_(T_CONSIGNES, data.header, data.rows);
-    return json_({ ok:true });
-  }
-
-  // 3) Création user (facultatif)
-  if (body._action === 'user_create') {
-    const data = readRaw_(T_USERS);
-    const H = data.header.map(h=>String(h||'').trim());
-    const iUser = H.indexOf('user');
-    const exists = data.rows.some(r => String(r[iUser]||'').toLowerCase() === user);
-    if (!exists) {
-      // on insère en respectant les colonnes existantes (apiUrl, chatId, etc. si présentes)
-      const row = new Array(H.length).fill('');
-      if (iUser>=0) row[iUser] = user;
-      const iStatus = H.indexOf('status');       if (iStatus>=0) row[iStatus] = 'active';
-      const iCreated= H.indexOf('createdAt');    if (iCreated>=0) row[iCreated]= now_();
-      const iUpdated= H.indexOf('updatedAt');    if (iUpdated>=0) row[iUpdated]= now_();
-      append_(T_USERS, [row]);
-    }
-    return json_({ ok:true });
-  }
-
-  return json_({ ok:true });
 }
