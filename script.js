@@ -1552,17 +1552,19 @@ async function initApp() {
     wrapper.addEventListener("dragstart", () => wrapper.classList.add("opacity-60", "dragging"));
     wrapper.addEventListener("dragend",   () => wrapper.classList.remove("opacity-60", "dragging"));
 
-    // Titre + actions (sans badge de priorité)
+    // Titre
     const header = document.createElement("div");
-    header.className = "flex items-start justify-between mb-2";
+    header.className = "mb-1";
 
     const title = document.createElement("span");
     title.className = "text-lg font-semibold " + (p === 1 ? "text-gray-900" : "text-gray-800");
     title.textContent = q.label;
     header.appendChild(title);
+    wrapper.appendChild(header);
 
+    // Actions sous le titre avec wrap mobile-friendly
     const actions = document.createElement("div");
-    actions.className = "mt-1 flex items-center gap-3 text-sm";
+    actions.className = "mt-1 flex flex-wrap items-center gap-3 text-sm";
 
 
     const editBtn = document.createElement("button");
@@ -1681,12 +1683,16 @@ async function initApp() {
     
     // Callback pour re-render immédiat après toggle SR (visible -> masquée)
     const lastChild = wrapper.lastElementChild; // la ligne SR ajoutée
-    const toggleBtn  = lastChild?.querySelector('button');
+    const toggleBtn = lastChild?.querySelector('button');
     if (toggleBtn && toggleBtn.onclick) {
       toggleBtn.onclick.onChange = (now) => {
-        if (now === "on") { // devient masquée
-          try { q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr:{ on:true } }); } catch {}
-          renderQuestions(appState.lastQuestions); // re-render immédiat
+        if (now === "on") {
+          try {
+            q.skipped = true; // bascule immédiate en masquée
+            const sr = Object.assign({}, q.scheduleInfo?.sr, { on:true });
+            q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr });
+          } catch {}
+          renderQuestions(appState.lastQuestions);
         }
       };
     }
@@ -1907,40 +1913,46 @@ async function initApp() {
         card.className = "mb-3 p-4 rounded-xl border border-gray-200 border-l-4 bg-gray-50";
         card.dataset.qid = q.id;
 
-        const head = document.createElement("div");
-        head.className = "flex items-start justify-between mb-2";
+        // Titre
         const title = document.createElement("span");
-        title.className = "text-lg font-semibold text-gray-800"; // foncé mais pas noir
+        title.className = "text-lg font-semibold text-gray-800";
         title.textContent = q.label;
-        head.appendChild(title);
+        card.appendChild(title);
 
-        // actions: Historique / SR / Modifier / Supprimer
+        // Actions sous le titre avec wrap mobile-friendly
         const actions = document.createElement("div");
-        actions.className = "mt-1 flex items-center gap-3 text-sm";
+        actions.className = "mt-1 flex flex-wrap items-center gap-3 text-sm";
 
         // Historique
         const histBtn = document.createElement("button");
         histBtn.type = "button";
-        histBtn.className = "text-gray-700 hover:underline";
+        histBtn.className = "text-gray-500 hover:underline"; // en gris, ok
         histBtn.textContent = "Voir l'historique des réponses";
         histBtn.onclick = () => {
           let panel = card.querySelector(".__hist__");
           if (panel) { panel.remove(); return; }
           panel = document.createElement("div");
           panel.className = "__hist__ mt-2";
-          renderLikertChart(panel, q.history, (s)=>s); // ton normalizer existe déjà plus haut
+          // On réutilise le rendu complet (graph + stats + liste), comme pour les visibles
+          renderHistory(q.history, panel, normalize, colorMap);
           card.appendChild(panel);
         };
         actions.appendChild(histBtn);
 
         // SR ON/OFF (et bascule live -> visible)
         const srRow = document.createElement("div");
-        addInlineSRToggle(srRow, q); // ajoute le bouton
+        addInlineSRToggle(srRow, q);
         const srBtn = srRow.querySelector("button");
         if (srBtn && srBtn.onclick) {
           srBtn.onclick.onChange = (now) => {
-            if (now === "off") {          // devient visible
-              try { q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr:{ on:false } }); } catch {}
+            if (now === "off") {
+              try {
+                // redevient visible immédiatement
+                q.skipped = false;
+                const sr = Object.assign({}, q.scheduleInfo?.sr, { on:false });
+                if (sr.due) delete sr.due; // on enlève l'info d'échéance côté UI
+                q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr });
+              } catch {}
               renderQuestions(appState.lastQuestions);
             }
           };
