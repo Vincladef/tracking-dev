@@ -962,6 +962,65 @@ async function initApp() {
   const _softBuffer = {};
   let _softTimer = null;
   let _softAnchors = new Set();
+  
+  // Flush immédiat du _softBuffer (POST "now")
+  // Utilise le même contexte (_mode/_date ou _category) que queueSoftSave()
+  async function flushSoftSaveNow(extraPatch = null, anchorEl = null) {
+    try {
+      if (extraPatch && typeof extraPatch === 'object') {
+        Object.assign(_softBuffer, extraPatch);
+        if (anchorEl) _softAnchors.add(anchorEl);
+      }
+
+      // Rien à poster ?
+      const keys = Object.keys(_softBuffer);
+      if (!keys.length) return { ok: true, skipped: true };
+
+      const selected = document.getElementById("date-select")?.selectedOptions[0];
+      const mode = selected?.dataset.mode || "daily";
+
+      const body = { apiUrl, user, ..._softBuffer };
+      if (mode === "daily") { 
+        body._mode = "daily"; 
+        body._date = selected.dataset.date; 
+      } else { 
+        body._mode = "practice"; 
+        body._category = selected.dataset.category; 
+      }
+
+      // Log ultra précis
+      console.log("[SR-FLUSH] POST → Worker", {
+        keys, 
+        bodyPreview: Object.fromEntries(keys.map(k=>[k, body[k]])), 
+        mode, 
+        ts: Date.now()
+      });
+
+      const res = await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
+      const ok = res.ok;
+
+      // Nettoyage buffer quoi qu'il arrive
+      for (const k of keys) delete _softBuffer[k];
+
+      if (ok) {
+        _softAnchors.forEach(a => flashSaved(a));
+        console.log("[SR-FLUSH] ✅ OK");
+        _softAnchors.clear();
+        return { ok: true };
+      } else {
+        console.error("[SR-FLUSH] ❌ HTTP", res.status);
+        showToast("❌ Échec de l'enregistrement auto", "red");
+        _softAnchors.clear();
+        return { ok: false, status: res.status };
+      }
+    } catch (e) {
+      console.error("[SR-FLUSH] ❌ Exception", e);
+      showToast("❌ Échec de l'enregistrement auto", "red");
+      _softAnchors.clear();
+      return { ok: false, error: String(e) };
+    }
+  }
+
   function queueSoftSave(patchObj, anchorEl) {
     console.log("queueSoftSave reçu:", patchObj);
     const keys = Object.keys(patchObj || {});
@@ -1917,30 +1976,36 @@ async function initApp() {
     // 1) Séparer visibles / masquées (SR) — si SR=OFF, JAMAIS masquée
     const hiddenSR = [];
     const visibles = [];
+    const iso = appState.selectedDate || null; // YYYY-MM-DD, pour le mode daily
 
     filteredQuestions.forEach(q => {
       const sr = (q?.scheduleInfo?.sr) || {};
-      const srOn   = !!sr.on;
+      const srOn = !!sr.on;
       const dueIso = sr?.due;
-      const iso    = appState.selectedDate; // YYYY-MM-DD en mode daily
+      const isHardOff = appState.__srHardOff?.has(String(q.id));
 
-      // ⚖️ Règle de cohérence : SR OFF => visible, même si skipped=true venu du back
-      if (!srOn) {
+      // SR OFF => toujours visible (on ignore skipped venant du back)
+      if (!srOn || isHardOff) {
         if (q.skipped) {
           console.warn(`[SR] Incohérence back: skipped=true alors que SR=OFF → forcé VISIBLE (id=${q.id}, "${q.label}")`);
+          q.skipped = false; // Normalize UI state
         }
-        q.skipped = false; // on normalise côté UI
         visibles.push(q);
         return;
       }
 
-      // SR ON : masquée si flagged OU si une échéance future la masque aujourd'hui
+      // SR ON : masquée si skipped OU pas encore due aujourd'hui (daily)
       let isHidden = !!q.skipped;
-      if (!isHidden && iso && dueIso && iso < dueIso) isHidden = true;
+      if (!isHidden && iso && dueIso && iso < dueIso) {
+        isHidden = true;
+      }
 
       (isHidden ? hiddenSR : visibles).push(q);
-
-      console.log(`[SR] Classif id=${q.id} "${q.label}" → ${isHidden ? 'HIDDEN' : 'VISIBLE'} | srOn=${srOn} skipped=${!!q.skipped} due=${dueIso||'-'} date=${iso||'-'}`);
+      
+      // Log de débogage détaillé
+      console.log(`[SR] Classif id=${q.id} "${q.label}" → ${isHidden ? 'HIDDEN' : 'VISIBLE'} | ` +
+                 `srOn=${srOn} skipped=${!!q.skipped} due=${dueIso || '-'} ` +
+                 `date=${iso || '-'} hardOff=${isHardOff}`);
     });
 
     // 2) Grouper les visibles par priorité
@@ -2042,13 +2107,34 @@ async function initApp() {
         addInlineSRToggle(srRow, q); // rangée complète : "Répétition espacée (délai auto) :" + bouton
         const toggleBtn = srRow.querySelector("button");
         if (toggleBtn && toggleBtn.onclick) {
-          toggleBtn.onclick.onChange = (now) => {
+          toggleBtn.onclick.onChange = async (now) => {
             console.log(`[SR-TOGGLE] MASQUÉ → ${now} | id=${q.id} "${q.label}"`);
-            if (now === "off") {                // devient visible
+            if (now === "off") {
+              const patch = {
+                [`__srToggle__${q.id}`]: "off",
+                [`__srClear__${q.id}`]: 1
+              };
+              
+              // Queue and immediately flush the update
+              queueSoftSave(patch, card);
+              await flushSoftSaveNow();
+
+              // Optimistic UI update
               try {
-                const sr = Object.assign({}, q.scheduleInfo?.sr, { on: false, due: null });
+                q.skipped = false;
+                const sr = Object.assign({}, q.scheduleInfo?.sr, { on: false });
+                if (sr.due) delete sr.due;
                 q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr });
-                // Le SR sera mis à jour via le queueSoftSave avec __srClear__
+                
+                // Update UI immediately
+                renderQuestions(appState.lastQuestions);
+                
+                // Log post-render state
+                setTimeout(() => {
+                  const visibleNow = !appState.qById.get(String(q.id))?.skipped;
+                  console.log(`[SR-UI] masqué→visible id=${q.id} visible=${visibleNow}`);
+                }, 0);
+                
               } catch (e) {
                 console.error("[SR-ERROR] Toggle OFF error:", e);
               }
