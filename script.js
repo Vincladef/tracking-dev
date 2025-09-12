@@ -1065,9 +1065,13 @@ async function initApp() {
     try {
       const res = await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
       if (res.ok) {
+        console.log(`✅ Enregistrement immédiat réussi (${reason}${qid ? `, qid=${qid}` : ''})`);
         _softAnchors.forEach(a => flashSaved(a));
-        console.log("[SR-FLUSH] ✅ OK");
-        _softAnchors.clear();
+        // Refresh view after successful save
+        const changedAnswerIds = Object.keys(_softBuffer).filter(k => /^\d+$/.test(k));
+        if (changedAnswerIds.length) {
+          refreshCurrentView(true);
+        }
         return { ok: true };
       } else {
         console.error("[SR-FLUSH] ❌ HTTP", res.status);
@@ -1116,7 +1120,7 @@ async function initApp() {
 
       const selected = document.getElementById("date-select")?.selectedOptions[0];
       const mode = selected?.dataset.mode || "daily";
-      const body = { apiUrl, user, ..._softBuffer };  // ✅ user ajouté
+      const body = { apiUrl, user, ..._softBuffer };  // user ajouté
       if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
       else { body._mode = "practice"; body._category = selected.dataset.category; }
 
@@ -1134,8 +1138,20 @@ async function initApp() {
         for (const k of keys) delete _softBuffer[k];
         const b = document.getElementById("__saving_badge__");
         if (b) setTimeout(()=>{ b.style.opacity = "0"; }, 80);
-        if (ok) { _softAnchors.forEach(a => flashSaved(a)); }
-        else { showToast("❌ Échec de l’enregistrement auto", "red"); }
+
+        if (ok) {
+          _softAnchors.forEach(a => flashSaved(a));
+
+          // If we just saved an answer (e.g., Likert/text),
+          // refresh the view to get an updated history
+          // (only if at least one key looks like a numeric consigne ID)
+          const changedAnswerIds = keys.filter(k => /^\d+$/.test(k));
+          if (changedAnswerIds.length) {
+            refreshCurrentView(true); // GET fresh => updated history and chart
+          }
+        } else {
+          showToast("❌ Échec de l’enregistrement auto", "red");
+        }
         _softAnchors.clear();
       }
     }, 1500);
