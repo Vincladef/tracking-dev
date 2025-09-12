@@ -152,6 +152,45 @@ function __persistCurrentDOMOrder() {
 
 // ===================================================
 
+// Helper for retrying failed requests with exponential backoff
+async function postWithRetry(url, body, {
+  retries = 5,
+  baseDelay = 800,      // ms
+  maxDelay = 6000,      // ms
+  jitter = 0.25         // ±25% de jitter
+} = {}) {
+  let attempt = 0, lastErr;
+
+  while (attempt <= retries) {
+    try {
+      const res = await fetch(url, { 
+        method: "POST", 
+        body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (res.ok) return res;
+
+      // On retente seulement sur 429 et erreurs 5xx
+      if (res.status !== 429 && (res.status < 500 || res.status > 599)) {
+        const t = await res.text().catch(()=> "");
+        throw new Error(t || `HTTP ${res.status}`);
+      }
+      lastErr = new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      lastErr = e;
+    }
+
+    attempt++;
+    if (attempt > retries) break;
+
+    const jitterMs = (Math.random()*2 - 1) * jitter * baseDelay;
+    const delay = Math.min(maxDelay, Math.round(baseDelay * Math.pow(2, attempt - 1) + jitterMs));
+    showToast("⏳ Quota atteint, tentative suivante…", "blue");
+    await new Promise(r => setTimeout(r, delay));
+  }
+  throw lastErr;
+}
+
 initApp();
 
 // ---- Toast minimal (non bloquant) ----
@@ -1054,18 +1093,16 @@ async function initApp() {
       if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
       else { body._mode = "practice"; body._category = selected.dataset.category; }
 
-      const postOnce = () => fetch(WORKER_URL, {
-        method: "POST",
-        body: JSON.stringify(body)
-      });
-
+      // Generate a unique transaction ID to prevent duplicate processing
+      body.__txid = (crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`);
+      
       let ok = false;
       try {
-        let res = await postOnce();
-        if (!res.ok) { await new Promise(r=>setTimeout(r,300)); res = await postOnce(); }
+        const res = await postWithRetry(WORKER_URL, body);
         ok = res.ok;
       } catch (e) {
-        ok = false;
+        console.error("❌ Envoi impossible :", e);
+        showToast("❌ Erreur d'envoi (quota). Réessaie dans un instant.", "red");
       } finally {
         for (const k of keys) delete _softBuffer[k];
         const b = document.getElementById("__saving_badge__");
