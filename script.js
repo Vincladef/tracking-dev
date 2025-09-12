@@ -1048,48 +1048,37 @@ async function initApp() {
     const changedKeys = keys.filter(isAnswerKey);
     if (!keys.length) return { ok: true, skipped: true };
 
-    const selected = document.getElementById("date-select")?.selectedOptions[0];
-    const mode = selected?.dataset.mode || "daily";
-    const body = { apiUrl, user, ..._softBuffer };
-    if (mode === "daily") {
-      body._mode = "daily";
-      body._date = selected.dataset.date;
-    } else {
-      body._mode = "practice";
-      body._category = selected.dataset.category;
+    const payload = { ..._softBuffer, _action: 'save_answers' };
+    if (appState.mode) payload._mode = appState.mode;
+    if (appState.currentDate) payload._date = appState.currentDate;
+    if (appState.currentCategory) payload._category = appState.currentCategory;
+
+    // Ajouter les ancres pour le feedback visuel
+    if (qid && !_softAnchors.some(a => a.dataset.qid === qid)) {
+      const anchor = document.querySelector(`[data-qid="${qid}"]`);
+      if (anchor) _softAnchors.push(anchor);
     }
 
-    console.log(`[SR-FLUSH] reason=${reason} id=${qid} → POST`, {
-      keys,
-      bodyPreview: Object.fromEntries(keys.map(k => [k, body[k]])),
-      mode,
-      ts: Date.now()
-    });
-
-    // Vider le buffer AVANT le POST pour éviter les doubles envois
-    for (const k of keys) delete _softBuffer[k];
-
     try {
-      const res = await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
+      const res = await postWithBackoff(payload);
       if (res.ok) {
-        console.log(`✅ Enregistrement immédiat réussi (${reason}${qid ? `, qid=${qid}` : ''})`);
         _softAnchors.forEach(a => flashSaved(a));
-        // Refresh view after successful save
-        if (changedKeys.length) {
-          refreshCurrentView(true);  // GET fresh -> history + chart mis à jour
+        // Ne plus recharger toute la page pour les réponses
+        const changedAnswerIds = changedKeys.filter(isAnswerKey);
+        if (changedAnswerIds.length) {
+          updateHistoryInPlace(_softBuffer);  // Mise à jour locale de l'historique
         }
+        _softBuffer = {};
+        _softAnchors = [];
         return { ok: true };
       } else {
-        console.error("[SR-FLUSH] ❌ HTTP", res.status);
-        showToast("❌ Échec de l'enregistrement auto", "red");
-        _softAnchors.clear();
-        return { ok: false, status: res.status };
+        showToast("❌ Échec de l'enregistrement", "red");
+        return { ok: false, error: res.error };
       }
     } catch (e) {
-      console.error("[SR-FLUSH] ❌ Exception", e);
-      showToast("❌ Échec de l'enregistrement auto", "red");
-      _softAnchors.clear();
-      return { ok: false, error: String(e) };
+      console.error("Erreur flushSoftSaveNow", e);
+      showToast("❌ Erreur réseau", "red");
+      return { ok: false, error: e };
     }
   }
 
@@ -1097,27 +1086,15 @@ async function initApp() {
     if (!patchObj || typeof patchObj !== 'object') return;
     
     // Log toggle actions for better debugging
-    for (const [key, value] of Object.entries(patchObj)) {
-      if (key.startsWith('__srToggle__')) {
-        const qid = key.replace('__srToggle__', '');
-        console.log(`[SR] Toggle demandé → ${value} (qid=${qid}). Envoi…`);
-      }
+    const toggleKeys = Object.keys(patchObj).filter(k => k.startsWith('__srToggle__'));
+    if (toggleKeys.length) {
+      console.log('SR Toggle detected in queueSoftSave:', toggleKeys);
     }
-    
-    // Update buffer and track anchor elements
-    Object.assign(_softBuffer, patchObj);
-    if (anchorEl) _softAnchors.add(anchorEl);
 
-    const savingBadge = document.getElementById("__saving_badge__") || (() => {
-      const b = document.createElement("div");
-      b.id = "__saving_badge__";
-      b.textContent = "Enregistrement…";
-      b.className = "fixed bottom-4 right-4 bg-gray-800 text-white text-xs px-3 py-1.5 rounded shadow";
-      b.style.opacity = "0"; b.style.transition = "opacity .15s";
-      document.body.appendChild(b);
-      return b;
-    })();
-    savingBadge.style.opacity = "1";
+    // Add to buffer and schedule save
+    const patch = { ...patchObj };  // Create a snapshot of the patch
+    Object.assign(_softBuffer, patch);
+    if (anchorEl) _softAnchors.push(anchorEl);
 
     if (_softTimer) clearTimeout(_softTimer);
     _softTimer = setTimeout(async () => {
@@ -1908,11 +1885,47 @@ async function initApp() {
     // Historique en bas de la carte
     if (q.history && q.history.length > 0) {
       const historyContainer = document.createElement('div');
+      historyContainer.className = "__history_host__";  // Ajout de la classe pour le ciblage
       renderHistory(q.history, historyContainer, normalize, colorMap);
       wrapper.appendChild(historyContainer);
     }
 
     container.appendChild(wrapper);
+  }
+
+  // Met à jour l'historique localement sans recharger toute la page
+  function updateHistoryInPlace(patch) {
+    // patch: { "c_fd9b2014": "Moyen", ... }
+    for (const [k, v] of Object.entries(patch)) {
+      if (!isAnswerKey(k)) continue;
+      const id = String(k);
+      const q = appState.qById?.get(id);
+      if (!q) continue;
+
+      // 1) Mise à jour du modèle en mémoire
+      const now = new Date();
+      const dt = now.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:mm"
+      (q.history ||= []).push({ datetime: dt, value: v });
+
+      // 2) Reconstruction du bloc historique de cette carte
+      const host = document.querySelector(`[data-qid="${id}"] .__history_host__`);
+      if (!host) continue;
+      host.innerHTML = "";
+
+      // Normalisation des réponses pour la couleur
+      const norm = (s) => String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[\u00A0\u202F\u200B]/g," ")
+                        .replace(/\s+/g," ").toLowerCase().trim();
+      const colorMap = {
+        "oui":"bg-green-100 text-green-800",
+        "plutot oui":"bg-green-50 text-green-700",
+        "moyen":"bg-yellow-100 text-yellow-800",
+        "plutot non":"bg-red-100 text-red-900",
+        "non":"bg-red-200 text-red-900",
+        "pas de reponse":"bg-gray-200 text-gray-700 italic"
+      };
+
+      renderHistory(q.history, host, norm, colorMap);
+    }
   }
 
   function renderHistory(history, container, normalize, colorMap) {
