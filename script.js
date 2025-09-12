@@ -595,8 +595,20 @@ async function initApp() {
   }
 
   function prettyKeyWithDate(entry) {
-    const dt = entry.datetime || entry.date || entry.key || "";
-    return dt.replace("T", " ").slice(0, 16); // ex: "2025-09-12 14:53"
+    const raw = String(entry.datetime || entry.date || entry.key || "");
+    // ISO "YYYY-MM-DD" ou "YYYY-MM-DDTHH:mm"
+    const mIso = raw.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?/);
+    if (mIso) {
+      const d = mIso[1], t = mIso[2];
+      return t ? `${d} (${t})` : d;
+    }
+    // FR "dd/MM/yyyy" ou "dd/MM/yyyy HH:mm"
+    const mFr = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ T](\d{2}:\d{2}))?/);
+    if (mFr) {
+      const d = `${mFr[3]}-${mFr[2]}-${mFr[1]}`, t = mFr[4];
+      return t ? `${d} (${t})` : d;
+    }
+    return raw;
   }
 
   await buildCombinedSelect();
@@ -704,6 +716,14 @@ async function initApp() {
         // succès
         showToast("✅ Réponses envoyées !");
         console.log("✅ Réponses envoyées avec succès.", { payload: entries });
+
+        // 👉 Historique : mise à jour locale uniquement au SUBMIT
+        const submittedPatch = Object.fromEntries(
+          Object.entries(entries).filter(([k]) => isAnswerKey(k))
+        );
+        if (Object.keys(submittedPatch).length) {
+          updateHistoryInPlace(submittedPatch);
+        }
 
         // recharge automatiquement la vue pour refléter les délais posés
         const selected = dateSelect.selectedOptions[0];
@@ -1089,9 +1109,6 @@ async function initApp() {
       _softAnchors.forEach(a => flashSaved(a));
       _softAnchors = [];
 
-      // ✅ mise à jour locale de l'historique (pas de reload global)
-      updateHistoryInPlace(snapshot);
-
       // purge du buffer
       _softBuffer = {};
       return { ok: true };
@@ -1169,12 +1186,6 @@ async function initApp() {
         if (ok) {
           _softAnchors.forEach(a => flashSaved(a));
           _softAnchors = [];
-
-          // Mise à jour locale de l'historique uniquement
-          const changedAnswerIds = keys.filter(isAnswerKey);
-          if (changedAnswerIds.length) {
-            updateHistoryInPlace(snapshot);
-          }
         } else {
           showToast("❌ Échec de l'enregistrement auto", "red");
         }
