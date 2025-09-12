@@ -416,27 +416,24 @@ async function initApp() {
   }
 
   function addInlineSRToggle(container, q, opts = {}) {
-    const srCurrent = q.scheduleInfo?.sr || { on: true }; // ON par défaut si inconnu
-    const hasSrFromBackend = !!(q.scheduleInfo && Object.prototype.hasOwnProperty.call(q.scheduleInfo, "sr"));
+    const srFromBack = q?.scheduleInfo?.sr;
+    const hasBackValue = !!(srFromBack && typeof srFromBack.on === 'boolean');
 
-    if (!(q.id in appState.srBaseline)) appState.srBaseline[q.id] = srCurrent.on ? "on" : "off";
-    if (!(q.id in appState.srToggles)) appState.srToggles[q.id] = srCurrent.on ? "on" : "off";
+    // état affiché = ce que dit le back si présent, sinon OFF par défaut
+    const currentOn = hasBackValue
+      ? !!srFromBack.on
+      : (appState.srToggles[q.id] === "on" ? true : false);
 
-    // Auto-push si le back n'a pas d'info mais l'UI est ON par défaut
-    if (!hasSrFromBackend && srCurrent.on && !appState.__srAutoPushed?.[q.id]) {
-      if (!appState.__srAutoPushed) appState.__srAutoPushed = {};
-      appState.__srAutoPushed[q.id] = true;
-      console.log(`[SR] Auto-push initial ON (back manquant) id=${q.id}`);
-      queueSoftSave({ ["__srToggle__" + q.id]: "on" }, container);
-      appState.srBaseline[q.id] = "on";
-      appState.srToggles[q.id] = "on";
-    }
+    if (!(q.id in appState.srBaseline)) appState.srBaseline[q.id] = currentOn ? "on" : "off";
+    if (!(q.id in appState.srToggles)) appState.srToggles[q.id] = currentOn ? "on" : "off";
 
     console.log(`[SR] UI toggle id=${q.id} "${q.label || ''}" → ${appState.srToggles[q.id]} (baseline=${appState.srBaseline[q.id]})`);
 
+    // ⛔️ PAS d'auto-push ici : on ne force plus "on" si le back est silencieux.
+
     const row = document.createElement("div");
     row.className = "flex items-center gap-2";
-  
+
     const label = document.createElement("span");
     label.className = "text-sm text-gray-700";
     label.textContent = "Répétition espacée (délai auto) :";
@@ -937,8 +934,19 @@ async function initApp() {
   let _softAnchors = new Set();
   function queueSoftSave(patchObj, anchorEl) {
     console.log("queueSoftSave reçu:", patchObj);
+    const keys = Object.keys(patchObj || {});
     Object.assign(_softBuffer, patchObj || {});
     if (anchorEl) _softAnchors.add(anchorEl);
+    
+    // Log toggle actions for better debugging
+    if (patchObj && typeof patchObj === 'object') {
+      for (const [key, value] of Object.entries(patchObj)) {
+        if (key.startsWith('__srToggle__')) {
+          const qid = key.replace('__srToggle__', '');
+          console.log(`[SR] Toggle demandé → ${value} (qid=${qid}). Envoi…`);
+        }
+      }
+    }
 
     const savingBadge = document.getElementById("__saving_badge__") || (() => {
       const b = document.createElement("div");
@@ -1951,10 +1959,10 @@ async function initApp() {
 
         // SR ON/OFF avec bascule live -> visible + logs
         const srRow = document.createElement("div");
-        addInlineSRToggle(srRow, q); // ajoute le bouton label + toggle
-        const srBtn = srRow.querySelector("button");
-        if (srBtn && srBtn.onclick) {
-          srBtn.onclick.onChange = (now) => {
+        addInlineSRToggle(srRow, q); // rangée complète : "Répétition espacée (délai auto) :" + bouton
+        const toggleBtn = srRow.querySelector("button");
+        if (toggleBtn && toggleBtn.onclick) {
+          toggleBtn.onclick.onChange = (now) => {
             console.log(`[SR] Toggle depuis MASQUÉ → ${now} | id=${q.id} "${q.label}"`);
             if (now === "off") {                // devient visible
               try {
@@ -1972,9 +1980,8 @@ async function initApp() {
             }
           };
         }
-        // On n'affiche que le bouton (pas le label texte)
-        const onlyToggle = srRow.querySelector("button");
-        if (onlyToggle) actions.appendChild(onlyToggle);
+        // on ajoute la rangée complète (libellé + bouton) :
+        actions.appendChild(srRow);
 
         // Modifier (gris)
         const edit = document.createElement("button");
