@@ -176,67 +176,55 @@ function parseSrIterDec_(raw) {
   }
 }
 
-// Decrement SR iterations for specific question IDs in practice mode
+// Decrémente et retourne des détails {id, before, after}
 function srTickIterations_(user, ids) {
-  if (!ids?.length) return 0;
-  
+  if (!ids || !ids.length) return [];
+
   const ss = SS();
   const sheet = ss.getSheetByName(T_CONSIGNES);
   const data = sheet.getDataRange().getValues();
   const header = data[0] || [];
-  
-  // Find column indices if they exist
+
   const colIdx = {
-    id: header.findIndex(h => String(h).toLowerCase() === 'id'),
-    user: header.findIndex(h => String(h).toLowerCase() === 'user'),
-    sr: header.findIndex(h => String(h).toLowerCase() === 'sr'),
-    srUnit: header.findIndex(h => String(h).toLowerCase() === 'sr_unit'),
-    srRemaining: header.findIndex(h => String(h).toLowerCase() === 'sr_remaining'),
-    skipped: header.findIndex(h => String(h).toLowerCase() === 'skipped'),
-    updatedAt: header.findIndex(h => String(h).toLowerCase() === 'updatedat')
+    id:           header.findIndex(h => String(h).toLowerCase() === 'id'),
+    user:         header.findIndex(h => String(h).toLowerCase() === 'user'),
+    sr:           header.findIndex(h => String(h).toLowerCase() === 'sr'),            // "on"/"off"
+    srUnit:       header.findIndex(h => String(h).toLowerCase() === 'sr_unit'),       // "iters"/"days"
+    srRemaining:  header.findIndex(h => String(h).toLowerCase() === 'sr_remaining'),  // nombre restant
+    skipped:      header.findIndex(h => String(h).toLowerCase() === 'skipped'),       // masqué ?
+    updatedAt:    header.findIndex(h => String(h).toLowerCase() === 'updatedat'),
   };
-  
-  // Skip if required columns are missing
-  if (Object.values(colIdx).some(idx => idx === -1)) {
-    console.error('Missing required columns in CONSIGNES sheet');
-    return 0;
+
+  // Colonnes minimales requises
+  if ([colIdx.id, colIdx.user, colIdx.sr, colIdx.srUnit, colIdx.srRemaining].some(i => i < 0)) {
+    Logger.log('[SR][DEC] Colonnes manquantes dans CONSIGNES');
+    return [];
   }
-  
-  const targetIds = new Set(ids.map(String));
-  let updatedCount = 0;
-  
-  // Process each row (skip header)
+
+  const want = new Set(ids.map(String));
+  const details = [];
+
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     const rowUser = String(row[colIdx.user] || '').toLowerCase();
-    const rowId = String(row[colIdx.id] || '');
-    
-    // Skip if not the target user or ID
-    if (rowUser !== user || !targetIds.has(rowId)) continue;
-    
-    const srOn = String(row[colIdx.sr] || '').toLowerCase() === 'on';
-    const srUnit = String(row[colIdx.srUnit] || '').toLowerCase();
-    let remaining = Number(row[colIdx.srRemaining] || 0);
-    
-    // Only process if SR is on, unit is 'iters', and there are remaining iterations
-    if (srOn && srUnit === 'iters' && remaining > 0) {
-      remaining = Math.max(0, remaining - 1); // Decrement but don't go below 0
-      row[colIdx.srRemaining] = remaining;
-      
-      // If remaining reaches 0, clear the skipped flag to make it visible again
-      if (remaining <= 0 && colIdx.skipped !== -1) {
-        row[colIdx.skipped] = '';
-      }
-      
-      // Update the updatedAt timestamp if the column exists
-      if (colIdx.updatedAt !== -1) {
-        row[colIdx.updatedAt] = now_();
-      }
-      
-      // Update the row in the sheet
-      sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
-      updatedCount++;
-      
+    const rowId   = String(row[colIdx.id]   || '');
+    if (rowUser !== user || !want.has(rowId)) continue;
+
+    const srOn    = String(row[colIdx.sr] || '').toLowerCase() === 'on';
+    const srUnit  = String(row[colIdx.srUnit] || '').toLowerCase();
+    let   before  = Number(row[colIdx.srRemaining] || 0);
+
+    if (srOn && srUnit === 'iters' && before > 0) {
+      const after = Math.max(0, before - 1);
+
+      row[colIdx.srRemaining] = after;
+      if (after <= 0 && colIdx.skipped >= 0) row[colIdx.skipped] = ''; // redevient visible
+      if (colIdx.updatedAt >= 0) row[colIdx.updatedAt] = now_();
+
+      withBackoff_(() => sheet.getRange(i + 1, 1, 1, row.length).setValues([row]));
+
+      details.push({ id: rowId, before: before, after: after });
+      Logger.log('[SR][DEC] id=%s %s→%s (user=%s)', rowId, before, after, user);
       console.log(`[SR] Decremented iterations for id=${rowId}, remaining=${remaining}`);
     }
   }
@@ -449,18 +437,31 @@ function doGet(e){
  ***********************/
 function doPost(e) {
   const out = { ok: true, srDec: [], daily: [] };
-  let body, user, mode;
-  
+  let body = {}, user = '', mode = 'daily';
+  let savedCount = 0;
+
   try {
-    // Parse request body
     body = e.postData ? JSON.parse(e.postData.contents) : {};
     user = String(body.user || '').toLowerCase().trim();
     mode = body._mode || 'daily';
-    
-    if (!user) return json_({ ...out, ok: false, error: 'user_required' });
-    
-    // 0) Handle SR iteration decrements (practice mode)
-    if (body.__srIterDec) {
+
+    if (!user) return json_({ ok:false, error:'user_required' });
+
+    Logger.log('[POST] user=%s mode=%s keys=%s', user, mode, Object.keys(body).join(','));
+
+    // === CRUD dédiés (retours immédiats) ===
+    if (body._action === 'consigne_create') {
+      const id = body.id || ('c_' + Utilities.getUuid().slice(0,8));
+      const row = [
+        user, id, body.label || '', body.category || '', body.type || 'text',
+        Number(body.priority || 2), body.frequency || '',
+        (body.sr ? 'on' : (body.sr === false ? 'off' : '')), // sr on/off
+        body.extra ? (typeof body.extra === 'string' ? body.extra : JSON.stringify(body.extra)) : '',
+        now_(), now_(), 'active'
+      ];
+      append_(T_CONSIGNES, [row]);
+      Logger.log('[CONS][CREATE] user=%s id=%s', user, id);
+      return json_({ ok:true, id });
       try {
         const ids = parseSrIterDec_(body.__srIterDec);
         if (ids.length > 0) {
