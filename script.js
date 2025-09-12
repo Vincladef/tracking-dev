@@ -601,6 +601,12 @@ async function initApp() {
     } else {
       entries._mode = "practice";
       entries._category = selected.dataset.category; // nom exact
+      
+      // Include hidden SR items for practice mode
+      if (appState.__hiddenPracticeSr?.length) {
+        entries.__srIterDec = JSON.stringify(appState.__hiddenPracticeSr);
+        console.log(`[SR] Including ${appState.__hiddenPracticeSr.length} hidden SR items for iteration decrement`);
+      }
     }
     entries.apiUrl = apiUrl;
     entries.user = user;   // ✅ IMPORTANT
@@ -1972,6 +1978,11 @@ async function initApp() {
     const hiddenSR = [];
     const visibles = [];
     const iso = appState.selectedDate || null; // YYYY-MM-DD, pour le mode daily
+    
+    // Track hidden SR items for practice mode
+    if (appState.mode === 'practice') {
+      appState.__hiddenPracticeSr = [];
+    }
 
     filteredQuestions.forEach(q => {
       const sr = (q?.scheduleInfo?.sr) || {};
@@ -1996,6 +2007,11 @@ async function initApp() {
       }
 
       (isHidden ? hiddenSR : visibles).push(q);
+      
+      // Track hidden SR items in practice mode
+      if (isHidden && appState.mode === 'practice' && srOn && !isHardOff) {
+        appState.__hiddenPracticeSr.push(String(q.id));
+      }
       
       // Log de débogage détaillé
       console.log(`[SR] Classif id=${q.id} "${q.label}" → ${isHidden ? 'HIDDEN' : 'VISIBLE'} | ` +

@@ -14,6 +14,18 @@ const T_CONSIGNES = 'CONSIGNES';
 const T_ANSWERS   = 'ANSWERS';
 const T_SCHEDULES = 'SCHEDULES'; // For scheduling and spaced repetition
 
+// Column indices for CONSIGNES sheet (0-based)
+const CONSIGNES_COLS = {
+  ID: 0,           // A: id
+  USER: 1,         // B: user
+  CATEGORY: 2,     // C: category
+  SR_ON: 3,        // D: sr (on/off)
+  SR_UNIT: 4,      // E: sr_unit (iters/days)
+  SR_REMAINING: 5, // F: sr_remaining (number of iterations left)
+  SKIPPED: 6,      // G: skipped (1/true if hidden, empty otherwise)
+  UPDATED_AT: 7    // H: updatedAt (timestamp)
+};
+
 /***********************
  * Helpers génériques
  ***********************/
@@ -132,9 +144,158 @@ function asISO_(d){
 }
 
 function formatFr_(iso){ // "YYYY-MM-DD" -> "dd/MM/yyyy"
-  if (!iso) return null;
+  if (!iso) return '';
   const d = fromISO_(iso);
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  if (!d) return String(iso);
+  return d.toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+// Parse the __srIterDec JSON array from the request body
+function parseSrIterDec_(raw) {
+  try {
+    const arr = JSON.parse(raw || '[]');
+    return Array.isArray(arr) ? arr.map(String) : [];
+  } catch (e) {
+    console.error('Error parsing __srIterDec:', e);
+    return [];
+  }
+}
+
+// Decrement SR iterations for specific question IDs in practice mode
+function srTickIterations_(user, ids) {
+  if (!ids?.length) return 0;
+  
+  const ss = SS();
+  const sheet = ss.getSheetByName(T_CONSIGNES);
+  const data = sheet.getDataRange().getValues();
+  const header = data[0] || [];
+  
+  // Find column indices if they exist
+  const colIdx = {
+    id: header.findIndex(h => String(h).toLowerCase() === 'id'),
+    user: header.findIndex(h => String(h).toLowerCase() === 'user'),
+    sr: header.findIndex(h => String(h).toLowerCase() === 'sr'),
+    srUnit: header.findIndex(h => String(h).toLowerCase() === 'sr_unit'),
+    srRemaining: header.findIndex(h => String(h).toLowerCase() === 'sr_remaining'),
+    skipped: header.findIndex(h => String(h).toLowerCase() === 'skipped'),
+    updatedAt: header.findIndex(h => String(h).toLowerCase() === 'updatedat')
+  };
+  
+  // Skip if required columns are missing
+  if (Object.values(colIdx).some(idx => idx === -1)) {
+    console.error('Missing required columns in CONSIGNES sheet');
+    return 0;
+  }
+  
+  const targetIds = new Set(ids.map(String));
+  let updatedCount = 0;
+  
+  // Process each row (skip header)
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const rowUser = String(row[colIdx.user] || '').toLowerCase();
+    const rowId = String(row[colIdx.id] || '');
+    
+    // Skip if not the target user or ID
+    if (rowUser !== user || !targetIds.has(rowId)) continue;
+    
+    const srOn = String(row[colIdx.sr] || '').toLowerCase() === 'on';
+    const srUnit = String(row[colIdx.srUnit] || '').toLowerCase();
+    let remaining = Number(row[colIdx.srRemaining] || 0);
+    
+    // Only process if SR is on, unit is 'iters', and there are remaining iterations
+    if (srOn && srUnit === 'iters' && remaining > 0) {
+      remaining = Math.max(0, remaining - 1); // Decrement but don't go below 0
+      row[colIdx.srRemaining] = remaining;
+      
+      // If remaining reaches 0, clear the skipped flag to make it visible again
+      if (remaining <= 0 && colIdx.skipped !== -1) {
+        row[colIdx.skipped] = '';
+      }
+      
+      // Update the updatedAt timestamp if the column exists
+      if (colIdx.updatedAt !== -1) {
+        row[colIdx.updatedAt] = now_();
+      }
+      
+      // Update the row in the sheet
+      sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
+      updatedCount++;
+      
+      console.log(`[SR] Decremented iterations for id=${rowId}, remaining=${remaining}`);
+    }
+  }
+  
+  return updatedCount;
+}
+
+// Fallback function to decrement all skipped items in a category
+function srTickAllSkippedInCategory_(user, category) {
+  if (!user || !category) return 0;
+  
+  const ss = SS();
+  const sheet = ss.getSheetByName(T_CONSIGNES);
+  const data = sheet.getDataRange().getValues();
+  const header = data[0] || [];
+  
+  // Find column indices if they exist
+  const colIdx = {
+    id: header.findIndex(h => String(h).toLowerCase() === 'id'),
+    user: header.findIndex(h => String(h).toLowerCase() === 'user'),
+    category: header.findIndex(h => String(h).toLowerCase() === 'category'),
+    sr: header.findIndex(h => String(h).toLowerCase() === 'sr'),
+    srUnit: header.findIndex(h => String(h).toLowerCase() === 'sr_unit'),
+    srRemaining: header.findIndex(h => String(h).toLowerCase() === 'sr_remaining'),
+    skipped: header.findIndex(h => String(h).toLowerCase() === 'skipped'),
+    updatedAt: header.findIndex(h => String(h).toLowerCase() === 'updatedat')
+  };
+  
+  // Skip if required columns are missing
+  if (Object.values(colIdx).some(idx => idx === -1)) {
+    console.error('Missing required columns in CONSIGNES sheet');
+    return 0;
+  }
+  
+  let updatedCount = 0;
+  
+  // Process each row (skip header)
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const rowUser = String(row[colIdx.user] || '').toLowerCase();
+    const rowCategory = String(row[colIdx.category] || '');
+    const isSkipped = String(row[colIdx.skipped] || '').trim() !== '';
+    
+    // Skip if not the target user, category, or not skipped
+    if (rowUser !== user || rowCategory !== category || !isSkipped) continue;
+    
+    const srOn = String(row[colIdx.sr] || '').toLowerCase() === 'on';
+    const srUnit = String(row[colIdx.srUnit] || '').toLowerCase();
+    let remaining = Number(row[colIdx.srRemaining] || 0);
+    
+    // Only process if SR is on, unit is 'iters', and there are remaining iterations
+    if (srOn && srUnit === 'iters' && remaining > 0) {
+      remaining = Math.max(0, remaining - 1); // Decrement but don't go below 0
+      row[colIdx.srRemaining] = remaining;
+      
+      // If remaining reaches 0, clear the skipped flag to make it visible again
+      if (remaining <= 0 && colIdx.skipped !== -1) {
+        row[colIdx.skipped] = '';
+      }
+      
+      // Update the updatedAt timestamp if the column exists
+      if (colIdx.updatedAt !== -1) {
+        row[colIdx.updatedAt] = now_();
+      }
+      
+      // Update the row in the sheet
+      sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
+      updatedCount++;
+      
+      console.log(`[SR] Decremented iterations for id=${row[colIdx.id]}, remaining=${remaining}`);
+    }
+  }
+  
+  return updatedCount;
 }
 
 // Builds the object expected by the frontend
@@ -299,6 +460,23 @@ function doPost(e){
       ]);
     }
     if (entries.length) append_(T_ANSWERS, entries);
+    
+    // 1.5) Handle SR iteration decrementation for practice mode
+    if (body._mode === 'practice') {
+      // Try to use the explicit list of IDs first
+      const ids = parseSrIterDec_(body.__srIterDec);
+      let updatedCount = 0;
+      
+      if (ids.length > 0) {
+        // Decrement only the specified IDs
+        updatedCount = srTickIterations_(user, ids);
+        console.log(`[SR] Decremented iterations for ${updatedCount} items using ID list`);
+      } else if (body._category) {
+        // Fallback: decrement all skipped items in the category
+        updatedCount = srTickAllSkippedInCategory_(user, body._category);
+        console.log(`[SR] Decremented iterations for ${updatedCount} items in category '${body._category}'`);
+      }
+    }
 
     // 2) ✅ Appliquer les toggles SR à CONSIGNES (ON/OFF)
     //    Les clés sont du type "__srToggle__<id>" avec valeur "on" | "off"
