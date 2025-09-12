@@ -2110,6 +2110,43 @@ async function initApp() {
         title.textContent = q.label;
         card.appendChild(title);
 
+        // ⏳ Métadonnée "reste X" (iters en pratique, jours en journalier)
+        (() => {
+          const sr = q?.scheduleInfo?.sr || {};
+          const mode = appState.mode || "daily";           // "practice" | "daily"
+          const remaining = q?.scheduleInfo?.remaining;    // nb d'itérations (pratique)
+          const dueIso = sr?.due || q?.scheduleInfo?.nextDate || null; // date due (journalier)
+          let note = "";
+
+          if (mode === "practice") {
+            if (Number.isFinite(remaining) && remaining > 0) {
+              note = `⏳ ${remaining} itération${remaining > 1 ? "s" : ""} restante${remaining > 1 ? "s" : ""}`;
+            }
+          } else {
+            // daily → en jours jusqu'à la date due
+            const baseIso = appState.selectedDate || new Date().toISOString().slice(0,10);
+            if (dueIso) {
+              const ms = (new Date(dueIso).setHours(0,0,0,0)) - (new Date(baseIso).setHours(0,0,0,0));
+              const days = Math.ceil(ms / 86400000);
+              if (days > 0) {
+                note = `⏳ Revient dans ${days} jour${days > 1 ? "s" : ""} (le ${normalizeFRDate(dueIso)})`;
+              } else if (days === 0) {
+                note = `⏳ Due aujourd'hui`;
+              } else {
+                // due dans le passé → par prudence on montre juste la date
+                note = `⏳ Due le ${normalizeFRDate(dueIso)}`;
+              }
+            }
+          }
+
+          if (note) {
+            const meta = document.createElement("div");
+            meta.className = "mt-1 text-xs text-gray-600";
+            meta.textContent = note;
+            card.appendChild(meta);
+          }
+        })();
+
         // actions: SR / Modifier / Supprimer (en dessous du titre)
         const actions = document.createElement("div");
         actions.className = "mt-1 flex flex-wrap items-center gap-3 text-sm";
