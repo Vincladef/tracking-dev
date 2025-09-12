@@ -177,6 +177,48 @@ function parseSrIterDec_(raw) {
 }
 
 // Decrémente et retourne des détails {id, before, after} (et UNLOGs clairs)
+// Décrémente les itérations dans SCHEDULES et renvoie [{id,before,after}]
+function srDecSchedulesIterations_(user, ids) {
+  if (!ids || !ids.length) return [];
+  ensureSchedulesHeader_();
+
+  const data = readRaw_(T_SCHEDULES);
+  const H = data.header.map(h => String(h||'').trim());
+  const iU = H.indexOf('user');
+  const iId= H.indexOf('id');
+  const iUnit = H.indexOf('unit');
+  const iRem  = H.indexOf('remaining');
+  const iUpd  = H.indexOf('updatedAt');
+
+  const want = new Set(ids.map(String));
+  const out = [];
+
+  for (let r = 0; r < data.rows.length; r++) {
+    const row = data.rows[r];
+    if (String(row[iU]||'').toLowerCase() !== user) continue;
+    const id = String(row[iId]||'');
+    if (!want.has(id)) continue;
+
+    const unit = String(row[iUnit]||'').toLowerCase();
+    let rem = Number(row[iRem] || 0);
+
+    if (unit === 'iters' && rem > 0) {
+      const before = rem;
+      const after  = Math.max(0, rem - 1);
+      row[iRem] = after;
+      if (iUpd >= 0) row[iUpd] = now_();
+      data.rows[r] = row;
+
+      out.push({ id, before, after });
+      Logger.log('[SR][DEC][SCHEDULES] user=%s id=%s %s→%s', user, id, before, after);
+    }
+  }
+
+  if (out.length) writeAll_(T_SCHEDULES, data.header, data.rows);
+  Logger.log('[SR][DEC][SCHEDULES] total=%s item(s) décrémenté(s) pour user=%s', out.length, user);
+  return out;
+}
+
 function srTickIterations_(user, ids) {
   if (!ids || !ids.length) return [];
 
@@ -440,6 +482,19 @@ function doPost(e) {
     body = e.postData ? JSON.parse(e.postData.contents) : {};
     user = String(body.user || '').toLowerCase().trim();
     mode = body._mode || 'daily';
+    
+    // 0) Décrément d'itérations (mode pratique) reçu du front
+    if (body.__srIterDec) {
+      try {
+        const ids = parseSrIterDec_(body.__srIterDec);
+        const details = srDecSchedulesIterations_(user, ids); // ← SCHEDULES
+        // expose dans la réponse JSON pour débogage
+        out.srDec = details;
+        Logger.log('[SR][DEC] payload=%s', JSON.stringify(details));
+      } catch (e) {
+        Logger.log('[SR][DEC][ERROR] %s', e && e.stack || e);
+      }
+    }
 
     if (!user) return json_({ ok:false, error:'user_required' });
 
@@ -580,31 +635,37 @@ function doPost(e) {
     }
 
     // 2) ✅ Appliquer les toggles SR à CONSIGNES (ON/OFF)
-    //    Les clés sont du type "__srToggle__<id>" avec valeur "on" | "off"
-    const srToggles = Object.keys(body).filter(k => k.startsWith("__srToggle__"));
-    if (srToggles.length) {
+    //    Les clés sont du type "__srToggle__<id>" avec valeur    // Toggles SR on/off
+    const srTogglesKeys = Object.keys(body).filter(k => k.startsWith('__srToggle__'));
+    if (srTogglesKeys.length) {
       const data = readRaw_(T_CONSIGNES);
-      const H = data.header.map(h => String(h||'').trim());
-      const iU = H.indexOf('user');
-      const iId = H.indexOf('id');
-      const iSr = H.indexOf('sr');
-      const iUpd = H.indexOf('updatedAt');
+      const H = data.header.map(h=>String(h||'').trim());
+      const iU = H.indexOf('user'), iId = H.indexOf('id'), iSr = H.indexOf('sr'), iUpd = H.indexOf('updatedAt');
 
-      const mapToggle = new Map();
-      for (const k of srToggles) {
-        const id = k.replace("__srToggle__", "");
-        const val = (String(body[k]||'').toLowerCase() === 'on') ? 'on' : 'off';
-        mapToggle.set(String(id), val);
+      const toggleMap = new Map();
+      for (const k of srTogglesKeys) {
+        const id = k.replace('__srToggle__','');
+        const val = (String(body[k]||'').toLowerCase()==='on') ? 'on' : 'off';
+        toggleMap.set(String(id), val);
       }
 
-      for (let i = 0; i < data.rows.length; i++) {
+      for (let i=0;i<data.rows.length;i++) {
         const r = data.rows[i];
         const rUser = String(r[iU]||'').toLowerCase();
         const rId   = String(r[iId]||'');
-        if (rUser === user && mapToggle.has(rId)) {
-          if (iSr >= 0)  r[iSr] = mapToggle.get(rId);   // maj sr
-          if (iUpd >= 0) r[iUpd] = now_();              // maj updatedAt
+        if (rUser === user && toggleMap.has(rId)) {
+          const newVal = toggleMap.get(rId);
+          if (iSr >= 0)  r[iSr] = newVal;
+          if (iUpd >= 0) r[iUpd] = now_();
           data.rows[i] = r;
+          
+          // si OFF, couper toute planif dans SCHEDULES pour éviter "skipped=true alors que SR=OFF"
+          if (newVal === 'off') {
+            upsertSchedule_(user, rId, { unit:'', n:0, interval:0, dueISO:'', remaining:0 });
+            Logger.log('[SR][TOGGLE] user=%s id=%s → OFF (schedule cleared)', user, rId);
+          } else {
+            Logger.log('[SR][TOGGLE] user=%s id=%s → ON', user, rId);
+          }
         }
       }
       writeAll_(T_CONSIGNES, data.header, data.rows);
@@ -686,10 +747,10 @@ function doPost(e) {
 
     return json_({
       ok: true,
-      saved: savedCount,
-      srDec: out.srDec,
-      daily: out.daily,
-      srToggled: srToggles.length
+      saved: savedCount || 0,
+      srDec: out.srDec || [],
+      daily: out.daily || [],
+      srToggled: srTogglesKeys ? srTogglesKeys.length : 0
     });
   } catch (err) {
     Logger.log('[POST][ERROR] %s', err && err.stack || err);
