@@ -2,6 +2,12 @@
 const WORKER_URL = "https://tight-snowflake-cdad.como-denizot.workers.dev/";
 const apiUrl = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
 
+// Est-ce que cette clé ressemble à une réponse utilisateur ?
+const isAnswerKey = (k) => (
+  /^\d+$/.test(k) ||               // ancien format (numérique pur)
+  /^c_[0-9a-f]+$/i.test(k)         // nouveau format style "c_fd9b2014"
+);
+
 // Helper pour normaliser les dates FR (dd/MM/yyyy) ou ISO (yyyy-MM-dd)
 function normalizeFRDate(raw) {
   if (!raw) return null;
@@ -1039,6 +1045,7 @@ async function initApp() {
   // Utilise le même contexte (_mode/_date ou _category) que queueSave()
   async function flushSoftSaveNow(reason = "manual", qid = "") {
     const keys = Object.keys(_softBuffer);
+    const changedKeys = keys.filter(isAnswerKey);
     if (!keys.length) return { ok: true, skipped: true };
 
     const selected = document.getElementById("date-select")?.selectedOptions[0];
@@ -1068,9 +1075,8 @@ async function initApp() {
         console.log(`✅ Enregistrement immédiat réussi (${reason}${qid ? `, qid=${qid}` : ''})`);
         _softAnchors.forEach(a => flashSaved(a));
         // Refresh view after successful save
-        const changedAnswerIds = Object.keys(_softBuffer).filter(k => /^\d+$/.test(k));
-        if (changedAnswerIds.length) {
-          refreshCurrentView(true);
+        if (changedKeys.length) {
+          refreshCurrentView(true);  // GET fresh -> history + chart mis à jour
         }
         return { ok: true };
       } else {
@@ -1145,7 +1151,7 @@ async function initApp() {
           // If we just saved an answer (e.g., Likert/text),
           // refresh the view to get an updated history
           // (only if at least one key looks like a numeric consigne ID)
-          const changedAnswerIds = keys.filter(k => /^\d+$/.test(k));
+          const changedAnswerIds = keys.filter(isAnswerKey);
           if (changedAnswerIds.length) {
             refreshCurrentView(true); // GET fresh => updated history and chart
           }

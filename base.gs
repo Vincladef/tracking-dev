@@ -87,8 +87,15 @@ function dayNameFrFromISO_(iso){
   return DAYS[d.getDay()];
 }
 
-function now_(){ return new Date(); }
-function todayYMD_(){ return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'); }
+function now_(){ 
+  const TZ = 'Europe/Paris';
+  return Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd'T'HH:mm");
+}
+
+function todayYMD_(){ 
+  const TZ = 'Europe/Paris';
+  return Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+}
 
 // ===== Scheduling and Spaced Repetition Helpers =====
 function ensureSchedulesHeader_(){
@@ -158,11 +165,12 @@ function asISO_(d){
   return m ? m[0] : s;
 }
 
-function formatFr_(iso){ // "YYYY-MM-DD" -> "dd/MM/yyyy"
+function formatFr_(iso){ // "YYYY-MM-DD" -> "dd/MM/yyyy HH:mm"
   if (!iso) return '';
   const d = fromISO_(iso);
   if (!d) return String(iso);
-  return d.toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const TZ = 'Europe/Paris';
+  return Utilities.formatDate(d, TZ, 'dd/MM/yyyy HH:mm');
 }
 
 // Parse the __srIterDec JSON array from the request body
@@ -613,17 +621,29 @@ function doPost(e) {
     // 2) Save answers if present
     if (body._action === 'save_answers') {
       const entries = [];
-      const date = body._date || new Date().toISOString().split('T')[0];
+      const TZ = 'Europe/Paris';
+      const now = new Date();
+      const date = body._date || Utilities.formatDate(now, TZ, 'yyyy-MM-dd');
       
       // Add answers in format [user, date, question_id, value, metadata, timestamp]
       for (const [k, v] of Object.entries(body)) {
         if (k.startsWith('c_')) {
+          // Create ISO date with minutes (no seconds) for frontend
+          const isoMinute = Utilities.formatDate(now, TZ, "yyyy-MM-dd'T'HH:mm");
+          // Pretty date for display
+          const frMinute = Utilities.formatDate(now, TZ, 'dd/MM/yyyy HH:mm');
+          
           entries.push([
             user,
             date,
             k,
             String(v || ''),
-            JSON.stringify({ _mode: mode, _category: body._category || null }),
+            JSON.stringify({ 
+              _mode: mode, 
+              _category: body._category || null,
+              datetime: isoMinute,
+              key: frMinute
+            }),
             now_()
           ]);
         }
