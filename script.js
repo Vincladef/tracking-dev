@@ -1131,7 +1131,12 @@ async function initApp() {
     const isPractice = /pratique\s*d[ée]lib[ée]r[ée]e/i.test(c?.frequency || "");
     if (freqBox) buildFreqMulti(freqBox, isPractice ? "" : (c ? (c.frequency || "") : "Quotidien"));
 
-    const initialSrOn = c ? (c.sr === "on" || !!(c.scheduleInfo && c.scheduleInfo.sr && c.scheduleInfo.sr.on)) : true;
+    // More robust SR state calculation with fallbacks
+    const initialSrOn = 
+      (c?.scheduleInfo?.sr?.on) ?? 
+      (c?.sr === "on") ?? 
+      (appState.srToggles?.[c?.id] === "on") ?? 
+      true;  // Default to ON if unknown
     const getSR = setupSRToggle(document.getElementById("sr-toggle"), initialSrOn);
 
     // Mode (daily vs practice)
@@ -1553,19 +1558,20 @@ async function initApp() {
     wrapper.addEventListener("dragstart", () => wrapper.classList.add("opacity-60", "dragging"));
     wrapper.addEventListener("dragend",   () => wrapper.classList.remove("opacity-60", "dragging"));
 
-    // Titre
+    // Header with title and actions in a responsive layout
     const header = document.createElement("div");
-    header.className = "mb-1";
+    header.className = "mb-1 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between";
 
     const title = document.createElement("span");
     title.className = "text-lg font-semibold " + (p === 1 ? "text-gray-900" : "text-gray-800");
     title.textContent = q.label;
     header.appendChild(title);
-    wrapper.appendChild(header);
 
-    // Actions sous le titre avec wrap mobile-friendly
+    // Actions with wrapping on mobile
     const actions = document.createElement("div");
-    actions.className = "mt-1 flex flex-wrap items-center gap-3 text-sm";
+    actions.className = "flex flex-wrap items-center gap-3 text-sm";
+    header.appendChild(actions);
+    wrapper.appendChild(header);
 
 
     const editBtn = document.createElement("button");
@@ -1924,21 +1930,13 @@ async function initApp() {
         const actions = document.createElement("div");
         actions.className = "mt-1 flex flex-wrap items-center gap-3 text-sm";
 
-        // Historique
-        const histBtn = document.createElement("button");
-        histBtn.type = "button";
-        histBtn.className = "text-gray-500 hover:underline"; // en gris, ok
-        histBtn.textContent = "Voir l'historique des réponses";
-        histBtn.onclick = () => {
-          let panel = card.querySelector(".__hist__");
-          if (panel) { panel.remove(); return; }
-          panel = document.createElement("div");
-          panel.className = "__hist__ mt-2";
-          // On réutilise le rendu complet (graph + stats + liste), comme pour les visibles
-          renderHistory(q.history, panel, normalize, colorMap);
-          card.appendChild(panel);
-        };
-        actions.appendChild(histBtn);
+        // Show history directly if available
+        if (q.history?.length) {
+          const historyContainer = document.createElement("div");
+          historyContainer.className = "mt-2";
+          renderHistory(q.history, historyContainer, normalize, colorMap);
+          card.appendChild(historyContainer);
+        }
 
         // SR ON/OFF (et bascule live -> visible)
         const srRow = document.createElement("div");
@@ -1947,13 +1945,11 @@ async function initApp() {
         if (srBtn && srBtn.onclick) {
           srBtn.onclick.onChange = (now) => {
             if (now === "off") {
-              try {
-                // redevient visible immédiatement
-                q.skipped = false;
-                const sr = Object.assign({}, q.scheduleInfo?.sr, { on:false });
-                if (sr.due) delete sr.due; // on enlève l'info d'échéance côté UI
-                q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr });
-              } catch {}
+              // Re-enable the question immediately
+              q.skipped = false;
+              const sr = { ...(q.scheduleInfo?.sr || {}), on: false };
+              delete sr.due;
+              q.scheduleInfo = { ...(q.scheduleInfo || {}), sr };
               renderQuestions(appState.lastQuestions);
             }
           };
