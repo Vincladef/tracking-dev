@@ -1745,18 +1745,16 @@ async function initApp() {
     const toggleBtn = lastChild?.querySelector('button');
     if (toggleBtn && toggleBtn.onclick) {
       toggleBtn.onclick.onChange = (now) => {
-        if (now === "on") { // devient masquée
-          console.log(`[SR] Toggle depuis VISIBLE → on | id=${q.id} "${q.label}"`);
+        if (now === "on") {
+          console.log(`[SR-GATE] VISIBLE → ON (id=${q.id}, "${q.label}") — on NE masque PAS côté front; on laisse le back décider (streak).`);
           try {
-            q.skipped = true;                       // ← clé pour masquer tout de suite
-            const sr = Object.assign({}, q.scheduleInfo?.sr, { on:true });
+            const sr = Object.assign({}, q.scheduleInfo?.sr, { on: true });
+            // On ne fixe PAS due/skipped côté front
+            if (sr.due) delete sr.due; // facultatif: laisser le back recalculer proprement
             q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr });
-          } catch {}
-          renderQuestions(appState.lastQuestions);  // re-render immédiat
-          setTimeout(() => {
-            const nowHidden = !!appState.qById.get(String(q.id))?.skipped;
-            console.log(`[SR] Résultat déplacement (visible→masqué) id=${q.id}: hidden=${nowHidden}`);
-          }, 0);
+          } catch (e) {
+            console.error("[SR-ERROR] Toggle ON error:", e);
+          }
         }
       };
     }
@@ -2045,20 +2043,15 @@ async function initApp() {
         const toggleBtn = srRow.querySelector("button");
         if (toggleBtn && toggleBtn.onclick) {
           toggleBtn.onclick.onChange = (now) => {
-            console.log(`[SR] Toggle depuis MASQUÉ → ${now} | id=${q.id} "${q.label}"`);
+            console.log(`[SR-TOGGLE] MASQUÉ → ${now} | id=${q.id} "${q.label}"`);
             if (now === "off") {                // devient visible
               try {
-                q.skipped = false;              // ← clé pour la re-classe immédiate
-                const sr = Object.assign({}, q.scheduleInfo?.sr, { on:false });
-                if (sr.due) delete sr.due;      // on enlève l'échéance côté UI
+                const sr = Object.assign({}, q.scheduleInfo?.sr, { on: false, due: null });
                 q.scheduleInfo = Object.assign({}, q.scheduleInfo, { sr });
-              } catch {}
-              renderQuestions(appState.lastQuestions);
-              // vérification post-render
-              setTimeout(() => {
-                const moved = !appState.qById.get(String(q.id))?.skipped;
-                console.log(`[SR] Résultat déplacement (masqué→visible) id=${q.id}: visible=${moved}`);
-              }, 0);
+                // Le SR sera mis à jour via le queueSoftSave avec __srClear__
+              } catch (e) {
+                console.error("[SR-ERROR] Toggle OFF error:", e);
+              }
             }
           };
         }
