@@ -63,6 +63,21 @@ function fromISO_(iso){ // "YYYY-MM-DD" -> Date (00:00:00)
   return new Date(y, (m||1)-1, d||1, 0,0,0,0);
 }
 
+// Helper for retrying Google Sheets operations with exponential backoff
+function withBackoff_(fn) {
+  var wait = 300, tries = 0;
+  while (true) {
+    try { 
+      return fn(); 
+    } catch (e) {
+      tries++;
+      if (tries >= 5) throw e;
+      Utilities.sleep(wait);
+      wait = Math.min(wait * 2, 5000);
+    }
+  }
+}
+
 function norm_(s){ return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim(); }
 function isPractice_(freq){ return /pratique\s*deliberee/.test(norm_(freq)); }
 function isArchived_(freq){ return /archiv/.test(norm_(freq)); }
@@ -432,49 +447,138 @@ function doGet(e){
  * - CRUD consignes (_action: consigne_create|update|delete)
  * - user_create (facultatif)
  ***********************/
-function doPost(e){
-  const body = e?.postData?.contents ? JSON.parse(e.postData.contents) : {};
-  const user = String(body.user||'').trim().toLowerCase();
-  if (!user) return json_({ error:'missing user' });
-
-  // 1) Réponses (autosave / submit)
-  if (body._mode) {
-    const date = body._date || todayYMD_();
-
-    // On collecte toutes les paires {qid:value}
-    const entries = [];
-    for (const [k,v] of Object.entries(body)) {
-      // ignore meta/commandes (_... , __...)
-      if (k.startsWith('_')) continue;
-      if (k.startsWith('__')) continue;
-      // id de question attendu: commence par lettre/chiffre, puis [A-Za-z0-9_-]
-      if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(k)) continue;
-
-      entries.push([
-        user,
-        date,
-        String(k),
-        String(v ?? ''),
-        JSON.stringify({ _mode: body._mode, _category: body._category || null }),
-        now_()
-      ]);
-    }
-    if (entries.length) append_(T_ANSWERS, entries);
+function doPost(e) {
+  const out = { ok: true, srDec: [], daily: [] };
+  let body, user, mode;
+  
+  try {
+    // Parse request body
+    body = e.postData ? JSON.parse(e.postData.contents) : {};
+    user = String(body.user || '').toLowerCase().trim();
+    mode = body._mode || 'daily';
     
-    // 1.5) Handle SR iteration decrementation for practice mode
-    if (body._mode === 'practice') {
-      // Try to use the explicit list of IDs first
-      const ids = parseSrIterDec_(body.__srIterDec);
-      let updatedCount = 0;
+    if (!user) return json_({ ...out, ok: false, error: 'user_required' });
+    
+    // 0) Handle SR iteration decrements (practice mode)
+    if (body.__srIterDec) {
+      try {
+        const ids = parseSrIterDec_(body.__srIterDec);
+        if (ids.length > 0) {
+          const updatedCount = srTickIterations_(user, ids);
+          console.log(`[SR] Decremented iterations for ${updatedCount} items`);
+          
+          // Add to response
+          const data = readRaw_(T_CONSIGNES);
+          const H = data.header.map(h => String(h || '').trim());
+          const iId = H.indexOf('id');
+          const iSr = H.indexOf('sr');
+          
+          if (iId >= 0 && iSr >= 0) {
+            for (const id of ids) {
+              const row = data.rows.find(r => String(r[iId]) === String(id));
+              if (row) {
+                try {
+                  const sr = JSON.parse(row[iSr] || '{}');
+                  out.srDec.push({
+                    id,
+                    before: sr.remaining + 1, // +1 because we already decremented
+                    after: sr.remaining
+                  });
+                } catch (e) {
+                  console.error(`Error processing SR for id=${id}:`, e);
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error in SR iteration decrement:', e);
+      }
+    }
+    
+    // 1) Handle daily SR hits (update next due date)
+    if (body.__srDailyHit) {
+      try {
+        const ids = JSON.parse(body.__srDailyHit || '[]');
+        const data = readRaw_(T_CONSIGNES);
+        const H = data.header.map(h => String(h || '').trim());
+        const iId = H.indexOf('id');
+        const iSr = H.indexOf('sr');
+        const iUser = H.indexOf('user');
+        
+        if (iId >= 0 && iSr >= 0 && iUser >= 0) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          
+          for (const id of ids) {
+            const rowIdx = data.rows.findIndex(r => 
+              String(r[iId]) === String(id) && 
+              String(r[iUser] || '').toLowerCase() === user
+            );
+            
+            if (rowIdx >= 0) {
+              try {
+                const sr = JSON.parse(data.rows[rowIdx][iSr] || '{}');
+                const prevDue = sr.nextDue ? new Date(sr.nextDue) : null;
+                
+                // Calculate next due date (simplified SR algorithm)
+                const nextDue = new Date(today);
+                const daysToAdd = sr.interval ? Math.min(sr.interval * 2, 30) : 1;
+                nextDue.setDate(nextDue.getDate() + daysToAdd);
+                
+                // Update SR data
+                sr.nextDue = nextDue.toISOString().split('T')[0];
+                sr.lastReviewed = today.toISOString().split('T')[0];
+                sr.interval = daysToAdd;
+                
+                // Update the row
+                data.rows[rowIdx][iSr] = JSON.stringify(sr);
+                
+                // Add to response
+                out.daily.push({ 
+                  id, 
+                  prevDue: prevDue ? prevDue.toISOString().split('T')[0] : null, 
+                  nextDue: sr.nextDue 
+                });
+                
+                console.log(`[SR][DAILY] id=${id} due:${prevDue}→${sr.nextDue} user=${user}`);
+              } catch (e) {
+                console.error(`Error processing daily hit for id=${id}:`, e);
+              }
+            }
+          }
+          
+          // Save all updates
+          if (out.daily.length > 0) {
+            withBackoff_(() => writeAll_(T_CONSIGNES, data.header, data.rows));
+          }
+        }
+      } catch (e) {
+        console.error('Error in daily SR hit processing:', e);
+      }
+    }
+    
+    // 2) Save answers if present
+    if (body._action === 'save_answers') {
+      const entries = [];
+      const date = body._date || new Date().toISOString().split('T')[0];
       
-      if (ids.length > 0) {
-        // Decrement only the specified IDs
-        updatedCount = srTickIterations_(user, ids);
-        console.log(`[SR] Decremented iterations for ${updatedCount} items using ID list`);
-      } else if (body._category) {
-        // Fallback: decrement all skipped items in the category
-        updatedCount = srTickAllSkippedInCategory_(user, body._category);
-        console.log(`[SR] Decremented iterations for ${updatedCount} items in category '${body._category}'`);
+      // Add answers in format [user, date, question_id, value, metadata, timestamp]
+      for (const [k, v] of Object.entries(body)) {
+        if (k.startsWith('c_')) {
+          entries.push([
+            user,
+            date,
+            k,
+            String(v || ''),
+            JSON.stringify({ _mode: mode, _category: body._category || null }),
+            now_()
+          ]);
+        }
+      }
+      
+      if (entries.length) {
+        withBackoff_(() => append_(T_ANSWERS, entries));
       }
     }
 

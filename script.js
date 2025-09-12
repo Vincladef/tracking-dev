@@ -191,6 +191,34 @@ async function postWithRetry(url, body, {
   throw lastErr;
 }
 
+async function postWithBackoff(body, {
+  maxRetries = 5,
+  baseDelayMs = 500,
+  retryOn = [429, 500, 502, 503, 504]
+} = {}) {
+  const attempt = async (n) => {
+    const res = await fetch(WORKER_URL, { 
+      method: "POST", 
+      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' }
+    }).catch(err => ({ ok:false, status:0, __netErr: String(err) }));
+
+    if (res.ok) return res;
+    const status = res.status || 0;
+    const shouldRetry = retryOn.includes(status) || res.__netErr;
+
+    console.warn(`[SUBMIT][try ${n}] status=${status} ${res.__netErr ? res.__netErr : ''}`);
+    if (!shouldRetry || n >= maxRetries) return res;
+
+    const jitter = Math.random() * 120;
+    const delay = Math.floor(baseDelayMs * Math.pow(2, n-1) + jitter);
+    await new Promise(r => setTimeout(r, delay));
+    return attempt(n + 1);
+  };
+  console.log(`[SUBMIT] start, body keys =`, Object.keys(body));
+  return attempt(1);
+}
+
 initApp();
 
 // ---- Toast minimal (non bloquant) ----
@@ -664,10 +692,7 @@ async function initApp() {
       Envoi...
     `;
 
-    fetch("https://tight-snowflake-cdad.como-denizot.workers.dev/", {
-      method: "POST",
-      body: JSON.stringify(entries)
-    })
+    postWithBackoff(entries)
       .then(async (res) => {
         const text = await res.text().catch(() => "");
         if (!res.ok) throw new Error(text || "HTTP " + res.status);
