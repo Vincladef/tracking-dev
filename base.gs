@@ -667,11 +667,19 @@ function doPost(e) {
         const interval = Math.floor(n);
         upsertSchedule_(user, k, {
           unit:'days', n, interval,
-          dueISO: addDays_(baseDateISO, interval),
-          remaining:''
+          dueISO: due,
+          remaining: ''
+        });
+        Logger.log('[SR][AUTO][DAILY] id=%s n=%s interval=%s due=%s', k, n, interval, due);
+      } else {
+        // practice (par itérations)
         if (L>=4) n+=1; else if (L===3) n+=0.5; else n=0;
         const interval = Math.floor(n);
-        upsertSchedule_(user, k, { unit:'iters', n, interval, remaining: interval, dueISO: '' });
+        upsertSchedule_(user, k, {
+          unit: 'iters', n, interval,
+          remaining: interval,
+          dueISO: ''
+        });
         Logger.log('[SR][AUTO][PRACTICE] id=%s n=%s remaining=%s', k, n, interval);
       }
     }
@@ -681,7 +689,7 @@ function doPost(e) {
       saved: savedCount,
       srDec: out.srDec,
       daily: out.daily,
-      srToggled: srTogglesKeys.length
+      srToggled: srToggles.length
     });
   } catch (err) {
     Logger.log('[POST][ERROR] %s', err && err.stack || err);
