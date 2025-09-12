@@ -589,12 +589,8 @@ async function initApp() {
   }
 
   function prettyKeyWithDate(entry) {
-    const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
-    const fullDate = (entry.date && dateRe.test(entry.date))
-      ? entry.date
-      : (entry.key && dateRe.test(entry.key) ? entry.key.match(dateRe)[0] : "");
-    const title = entry.date ? (entry.key || entry.date) : (entry.key || "");
-    return fullDate ? `${title} (${fullDate})` : title;
+    const dt = entry.datetime || entry.date || entry.key || "";
+    return dt.replace("T", " ").slice(0, 16); // ex: "2025-09-12 14:53"
   }
 
   await buildCombinedSelect();
@@ -854,9 +850,9 @@ async function initApp() {
     const levels = ["non","plutot non","moyen","plutot oui","oui"];
     const pretty  = { "non":"Non","plutot non":"Plutôt non","moyen":"Moyen","plutot oui":"Plutôt oui","oui":"Oui" };
     const pickDate = (e) => {
-      const dateRe = /(\d{2})\/(\d{2})\/(\d{4})/;
-      if (e.date && dateRe.test(e.date)) return e.date;
-      if (e.key  && dateRe.test(e.key))  return e.key.match(dateRe)[0];
+      if (e.datetime) return e.datetime;               // ex: "2025-09-12T14:53"
+      if (e.date) return e.date;
+      if (e.key) return e.key;
       return "";
     };
     const points = ordered.map(e => {
@@ -864,9 +860,15 @@ async function initApp() {
       const idx = levels.indexOf(v);
       if (idx === -1) return null;
       const fullDate = pickDate(e);
-      const shortDate = fullDate ? fullDate.slice(0,5) : "";
+      const shortDate = fullDate?.slice(11, 16) || fullDate?.slice(0, 10);  // HH:mm ou fallback YYYY-MM-DD
       const fallback = e.date || e.key || "";
-      return { idx, v, label: shortDate || fallback.slice(0,5), fullLabel: fullDate || fallback, raw: e };
+      return {
+        idx,
+        v,
+        label: shortDate || fallback.slice(0, 10),
+        fullLabel: fullDate ? fullDate.replace("T", " ").slice(0, 16) : fallback,  // ex: "2025-09-12 14:53"
+        raw: e
+      };
     }).filter(Boolean);
     if (points.length < 2) return;
 
