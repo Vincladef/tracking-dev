@@ -1,37 +1,46 @@
-// SCRIPT.JS : 🧑 Identifier l’utilisateur depuis l’URL
+// SCRIPT.JS : 🧑 Identifier l'utilisateur depuis l’URL
 const WORKER_URL = "https://tight-snowflake-cdad.como-denizot.workers.dev/";
+const apiUrl = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
 
 async function apiFetch(method, pathOrParams, opts = {}) {
   if (method !== "GET") throw new Error("apiFetch() n'est utilisé ici que pour GET");
   let query = pathOrParams || "";
+
+  // Ajoute user=... à chaque GET
+  if (!/[?&]user=/.test(query)) {
+    query += (query.includes("?") ? "&" : "?") + "user=" + encodeURIComponent(user);
+  }
   if (opts.fresh) {
     query += (query.includes("?") ? "&" : "?") + "nocache=1&_=" + Date.now();
   }
+
   const u = new URL(WORKER_URL);
   u.searchParams.set("apiUrl", apiUrl);
   u.searchParams.set("query", query);
-  if (opts.fresh) u.searchParams.set("nocache", "1"); // hint pour le Worker
+  if (opts.fresh) u.searchParams.set("nocache", "1");
+
   const res = await fetch(u.toString());
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : res.text();
 }
 
 function toQuestions(raw) {
-  console.log("↩︎ Réponse brute:", { type: typeof raw, raw });
   if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw?.consignes)) return raw.consignes;
   if (Array.isArray(raw?.questions)) return raw.questions;
-  if (Array.isArray(raw?.data))      return raw.data;
-  if (Array.isArray(raw?.items))     return raw.items;
+  if (Array.isArray(raw?.data)) return raw.data;
+  if (Array.isArray(raw?.items)) return raw.items;
   if (typeof raw === "string") {
     const txt = raw.trim();
     if (txt.startsWith("<!DOCTYPE") || txt.startsWith("<html")) {
       console.error("⚠️ Le backend renvoie du HTML (probable erreur Apps Script).");
       return null;
     }
-    try { const j = JSON.parse(txt); return toQuestions(j); } catch { return null; }
+    try { return toQuestions(JSON.parse(txt)); } catch { return null; }
   }
   return null;
 }
+
 const urlParams = new URLSearchParams(location.search);
 const user = urlParams.get("user")?.toLowerCase();
 
@@ -40,10 +49,7 @@ if (!user) {
   throw new Error("Utilisateur manquant");
 }
 
-// 🌐 Récupération automatique de l’apiUrl depuis le Google Sheet central
-const CONFIG_URL = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
-
-let apiUrl = null;
+// === API unique (ton backend Apps Script) ===
 
 // ✨ Centralisation de l'état de l'application
 const appState = {
@@ -53,7 +59,7 @@ const appState = {
   __srAutoPushed: {}, // évite les double-envois
 };
 
-// ====== PERSISTENCE DE L'ORDRE (localStorage) ======
+// ====== PERSISTANCE DE L'ORDRE (localStorage) ======
 function __ctxKey() {
   const sel = document.getElementById("date-select");
   const opt = sel?.selectedOptions?.[0] || null;
@@ -61,10 +67,12 @@ function __ctxKey() {
   if (mode === "practice") return `practice:${opt?.dataset?.category || ""}`;
   return "daily";
 }
+
 function __orderStoreKey() {
   // un ordre par utilisateur et par contexte (daily vs par catégorie)
   return `__consigneOrder__:${user}:${__ctxKey()}`;
 }
+
 function __loadSavedOrder() {
   try {
     const raw = localStorage.getItem(__orderStoreKey());
@@ -73,9 +81,11 @@ function __loadSavedOrder() {
     return { 1: Array.isArray(o[1])?o[1]:[], 2: Array.isArray(o[2])?o[2]:[], 3: Array.isArray(o[3])?o[3]:[] };
   } catch { return { 1: [], 2: [], 3: [] }; }
 }
+
 function __saveOrder(o) {
   try { localStorage.setItem(__orderStoreKey(), JSON.stringify({1:o[1]||[],2:o[2]||[],3:o[3]||[]})); } catch {}
 }
+
 function __applySavedOrderToGroups(groups) {
   // Trie chaque groupe par ordre persistant s'il existe; sinon par label
   const saved = __loadSavedOrder();
@@ -89,6 +99,7 @@ function __applySavedOrderToGroups(groups) {
     });
   }
 }
+
 function __persistCurrentDOMOrder() {
   // Lit l'ordre actuel dans le DOM et le sauvegarde
   const lists = appState.__lists || {};
@@ -103,36 +114,10 @@ function __persistCurrentDOMOrder() {
   __saveOrder(out);
   try { flashSaved(document.getElementById("daily-form")); } catch {}
 }
+
 // ===================================================
 
-fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
-  .then(async res => {
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(`Erreur HTTP lors de la récupération de la config : ${res.status} — ${txt.slice(0, 200)}`);
-    }
-    return res.json();
-  })
-  .then(config => {
-    if (config.error) {
-      showToast(`❌ ${config.error}`, "red");
-      throw new Error(config.error);
-    }
-
-    apiUrl = config.apiurl;
-    console.log("✅ API URL récupérée :", apiUrl);
-
-    if (!apiUrl) {
-      showToast("❌ Aucune URL WebApp trouvée pour l’utilisateur.", "red");
-      throw new Error("API URL introuvable");
-    }
-
-    initApp();
-  })
-  .catch(err => {
-    showToast("❌ Erreur lors du chargement de la configuration.", "red");
-    console.error("Erreur attrapée :", err);
-  });
+initApp();
 
 // ---- Toast minimal (non bloquant) ----
 function ensureToast() {
@@ -286,8 +271,9 @@ async function initApp() {
     async function loadPracticeCatsOnce() {
       if (_catsLoaded) return; _catsLoaded = true;
       try {
-        const cats = await apiFetch("GET", `?mode=practice`);
-        if (Array.isArray(cats) && cats.length) {
+        const resp = await apiFetch("GET", `?mode=practice`);
+        const cats = Array.isArray(resp) ? resp : (resp?.categories || []);
+        if (cats.length) {
           // insère un séparateur visuel au moment du chargement
           const sepGroup = document.createElement("optgroup");
           sepGroup.label = "────────";
@@ -332,11 +318,13 @@ async function initApp() {
   }
   function freqSetToString(set) { return Array.from(set).join(", "); }
   async function getAllCategories() {
-    const cats = await apiFetch("GET", `?mode=practice`, { fresh: true }).catch(()=>[]);
-    const set = new Set(Array.isArray(cats)?cats:[]);
+    const respCats = await apiFetch("GET", `?mode=practice`, { fresh: true }).catch(()=>({}));
+    const set = new Set(Array.isArray(respCats) ? respCats : (respCats.categories || []));
+
     try {
-      const all = await apiFetch("GET", `?mode=consignes`, { fresh: true });
-      (Array.isArray(all)?all:[]).forEach(x => { if (x.category) set.add(x.category); });
+      const respAll = await apiFetch("GET", `?mode=consignes`, { fresh: true });
+      const all = Array.isArray(respAll) ? respAll : (respAll.consignes || []);
+      all.forEach(x => { if (x?.category) set.add(x.category); });
     } catch {}
     return Array.from(set).filter(Boolean).sort((a,b)=>a.localeCompare(b,'fr'));
   }
@@ -550,6 +538,7 @@ async function initApp() {
       entries._category = selected.dataset.category; // nom exact
     }
     entries.apiUrl = apiUrl;
+    entries.user = user;   // ✅ IMPORTANT
 
     console.log("📦 Envoi des données au Worker...", entries);
 
@@ -934,7 +923,7 @@ async function initApp() {
 
       const selected = document.getElementById("date-select")?.selectedOptions[0];
       const mode = selected?.dataset.mode || "daily";
-      const body = { apiUrl, ..._softBuffer };
+      const body = { apiUrl, user, ..._softBuffer };  // ✅ user ajouté
       if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
       else { body._mode = "practice"; body._category = selected.dataset.category; }
 
@@ -972,7 +961,7 @@ async function initApp() {
       const selected = document.getElementById("date-select")?.selectedOptions[0];
       if (!selected) return;
       const mode = selected.dataset.mode || "daily";
-      const body = { apiUrl, ..._softBuffer };
+      const body = { apiUrl, user, ..._softBuffer };  // ✅ user ajouté
       if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
       else { body._mode = "practice"; body._category = selected.dataset.category; }
       navigator.sendBeacon(WORKER_URL, JSON.stringify(body));
@@ -981,8 +970,9 @@ async function initApp() {
 
   // ====== GESTION CONSIGNES (UI) ======
   async function loadConsignes() {
-    const list = await apiFetch("GET", `?mode=consignes`, { fresh: true });
-    renderConsignesManager(Array.isArray(list) ? list : []);
+    const resp = await apiFetch("GET", `?mode=consignes`, { fresh: true });
+    const list = Array.isArray(resp) ? resp : (resp?.consignes || []);
+    renderConsignesManager(list);
   }
 
   function renderConsignesManager(consignes) {
@@ -1173,7 +1163,7 @@ async function initApp() {
               const tKey = "__srToggle__" + payload.id;
               const selected = document.getElementById("date-select")?.selectedOptions[0];
               const mode = selected?.dataset.mode || "daily";
-              const body = { apiUrl, [tKey]: getSR() ? "on" : "off" };
+              const body = { apiUrl, user, [tKey]: getSR() ? "on" : "off" };
               if (mode === "daily") { body._mode="daily"; body._date=selected.dataset.date; }
               else { body._mode="practice"; body._category=selected.dataset.category; }
               fetch(WORKER_URL, { method:"POST", body:JSON.stringify(body) });
@@ -1214,7 +1204,7 @@ async function initApp() {
                 if (getSR() && newId) try {
                   const selected = document.getElementById("date-select")?.selectedOptions[0];
                   const mode = selected?.dataset.mode || "daily";
-                  const body = { apiUrl, ["__srToggle__"+newId]: "on" };
+                  const body = { apiUrl, user, ["__srToggle__"+newId]: "on" };
                   if (mode === "daily") { body._mode="daily"; body._date=selected.dataset.date; }
                   else { body._mode="practice"; body._category=selected.dataset.category; }
                   fetch(WORKER_URL, { method:"POST", body:JSON.stringify(body) });
@@ -1240,7 +1230,7 @@ async function initApp() {
               if (getSR() && newId) {
                 const selected = document.getElementById("date-select")?.selectedOptions[0];
                 const mode = selected?.dataset.mode || "daily";
-                const body = { apiUrl, ["__srToggle__"+newId]: "on" };
+                const body = { apiUrl, user, ["__srToggle__"+newId]: "on" };
                 if (mode === "daily") { body._mode="daily"; body._date=selected.dataset.date; }
                 else { body._mode="practice"; body._category=selected.dataset.category; }
                 fetch(WORKER_URL, { method:"POST", body:JSON.stringify(body) });
@@ -1278,6 +1268,7 @@ async function initApp() {
   async function createConsigne(payload) {
     const body = {
       _action: "consigne_create",
+      user,
       category: payload.category,
       type: payload.type,
       frequency: payload.frequency || "pratique délibérée",
@@ -1302,11 +1293,12 @@ async function initApp() {
   async function updateConsigne(payload) {
     const body = {
       _action: "consigne_update",
+      user,
       id: payload.id,
       category: payload.category,
       type: payload.type,
       frequency: payload.frequency,
-      newLabel: payload.label,
+      label: payload.label,
       priority: payload.priority,
       apiUrl
     };
@@ -1317,7 +1309,7 @@ async function initApp() {
   }
 
   async function deleteConsigne(id) {
-    const body = { _action: "consigne_delete", id, apiUrl };
+    const body = { _action: "consigne_delete", user, id, apiUrl };  // ✅
     await fetch(WORKER_URL, {
       method: "POST",
       body: JSON.stringify(body)
