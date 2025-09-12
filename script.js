@@ -1170,7 +1170,8 @@ async function initApp() {
         category: (document.getElementById("consigne-category")?.value || "").trim(),
         type: form.elements.type.value,
         priority: parseInt(form.elements.priority.value || "2", 10),
-        frequency: daily ? (readFreqMulti(document.getElementById("freq-multi")) || "Quotidien") : "pratique délibérée"
+        frequency: daily ? (readFreqMulti(document.getElementById("freq-multi")) || "Quotidien") : "pratique délibérée",
+        sr: getSR() // Include SR state in payload
       };
       if (!payload.label) { showToast("❌ Label requis", "red"); isSubmitting = false; return; }
 
@@ -1984,10 +1985,10 @@ async function initApp() {
         };
         actions.appendChild(del);
 
-        head.appendChild(actions);
-        card.appendChild(head);
-
-        // (pas de bouton "Délai" ici)
+        // Add actions directly to the card
+        card.appendChild(actions);
+        
+        // Add card to the container
         inner.appendChild(card);
       });
 
