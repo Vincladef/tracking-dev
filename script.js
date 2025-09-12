@@ -53,6 +53,58 @@ const appState = {
   __srAutoPushed: {}, // évite les double-envois
 };
 
+// ====== PERSISTENCE DE L'ORDRE (localStorage) ======
+function __ctxKey() {
+  const sel = document.getElementById("date-select");
+  const opt = sel?.selectedOptions?.[0] || null;
+  const mode = opt?.dataset?.mode || "daily";
+  if (mode === "practice") return `practice:${opt?.dataset?.category || ""}`;
+  return "daily";
+}
+function __orderStoreKey() {
+  // un ordre par utilisateur et par contexte (daily vs par catégorie)
+  return `__consigneOrder__:${user}:${__ctxKey()}`;
+}
+function __loadSavedOrder() {
+  try {
+    const raw = localStorage.getItem(__orderStoreKey());
+    if (!raw) return { 1: [], 2: [], 3: [] };
+    const o = JSON.parse(raw);
+    return { 1: Array.isArray(o[1])?o[1]:[], 2: Array.isArray(o[2])?o[2]:[], 3: Array.isArray(o[3])?o[3]:[] };
+  } catch { return { 1: [], 2: [], 3: [] }; }
+}
+function __saveOrder(o) {
+  try { localStorage.setItem(__orderStoreKey(), JSON.stringify({1:o[1]||[],2:o[2]||[],3:o[3]||[]})); } catch {}
+}
+function __applySavedOrderToGroups(groups) {
+  // Trie chaque groupe par ordre persistant s'il existe; sinon par label
+  const saved = __loadSavedOrder();
+  const byLabel = (a,b)=> (a.label||"").localeCompare(b.label||"", "fr", {sensitivity:"base"});
+  for (const p of [1,2,3]) {
+    const index = new Map((saved[p]||[]).map((id, i)=> [String(id), i]));
+    groups[p].sort((a,b)=>{
+      const ia = index.has(String(a.id)) ? index.get(String(a.id)) : Number.MAX_SAFE_INTEGER;
+      const ib = index.has(String(b.id)) ? index.get(String(b.id)) : Number.MAX_SAFE_INTEGER;
+      return ia === ib ? byLabel(a,b) : ia - ib;
+    });
+  }
+}
+function __persistCurrentDOMOrder() {
+  // Lit l'ordre actuel dans le DOM et le sauvegarde
+  const lists = appState.__lists || {};
+  const out = { 1: [], 2: [], 3: [] };
+  for (const p of [1,2,3]) {
+    const el = lists[p];
+    if (!el) continue;
+    out[p] = [...el.querySelectorAll('[data-qid]')]
+      .map(n => String(n.dataset.qid))
+      .filter(Boolean);
+  }
+  __saveOrder(out);
+  try { flashSaved(document.getElementById("daily-form")); } catch {}
+}
+// ===================================================
+
 fetch(`${CONFIG_URL}?user=${encodeURIComponent(user)}`)
   .then(async res => {
     if (!res.ok) {
@@ -1506,7 +1558,11 @@ async function initApp() {
     up.className = "text-gray-500 hover:underline";
     up.textContent = "↑";
     up.title = "Monter";
-    up.onclick = () => { const prev = wrapper.previousElementSibling; if (prev) wrapper.parentElement.insertBefore(wrapper, prev); };
+    up.onclick = () => {
+      const prev = wrapper.previousElementSibling;
+      if (prev) prev.parentElement.insertBefore(wrapper, prev);
+      __persistCurrentDOMOrder();
+    };
 
     const down = document.createElement("button");
     down.type = "button";
@@ -1517,6 +1573,7 @@ async function initApp() {
     down.onclick = () => {
       const next = wrapper.nextElementSibling;
       if (next) next.after(wrapper); // déplace la carte courante APRÈS son voisin du dessous
+      __persistCurrentDOMOrder();
     };
 
     actions.appendChild(up);
@@ -1732,7 +1789,7 @@ async function initApp() {
       (p === 1 || p === 2 || p === 3 ? groups[p] : groups[2]).push(q);
     });
     const byLabel = (a,b)=> (a.label||"").localeCompare(b.label||"", "fr", {sensitivity:"base"});
-    groups[1].sort(byLabel); groups[2].sort(byLabel); groups[3].sort(byLabel);
+    __applySavedOrderToGroups(groups);
 
     // utilitaires existants (pour renderQuestion)
     const normalize = (str) =>
@@ -1783,6 +1840,11 @@ async function initApp() {
     if (sectionHighListEl)   enableDnD(sectionHighListEl,   1);
     if (sectionMediumListEl) enableDnD(sectionMediumListEl, 2);
     if (sectionLowListEl)    enableDnD(sectionLowListEl,    3);
+
+    // Expose lists pour persistance d'ordre
+    appState.__lists = { 1: sectionHighListEl, 2: sectionMediumListEl, 3: sectionLowListEl };
+    // Baseline: s'il manque des éléments en storage, sauver l'ordre actuel
+    __persistCurrentDOMOrder();
 
     // 4) Panneau « Questions masquées — répétition espacée »
     if (hiddenSR.length) {
@@ -1977,6 +2039,7 @@ async function initApp() {
         }
       }
       flashSaved(listEl);
+      __persistCurrentDOMOrder();
     });
 
     listEl.addEventListener("dragleave", (e) => {
