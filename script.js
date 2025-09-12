@@ -2,6 +2,21 @@
 const WORKER_URL = "https://tight-snowflake-cdad.como-denizot.workers.dev/";
 const apiUrl = "https://script.google.com/macros/s/AKfycbyF2k4XNW6rqvME1WnPlpTFljgUJaX58x0jwQINd6XPyRVP3FkDOeEwtuierf_CcCI5hQ/exec";
 
+// Helper pour normaliser les dates FR (dd/MM/yyyy) ou ISO (yyyy-MM-dd)
+function normalizeFRDate(raw) {
+  if (!raw) return null;
+  const s = String(raw);
+  // Déjà en FR -> on renvoie tel quel
+  if (s.includes('/')) return s;
+  // ISO -> convertir
+  const [y, m, d] = s.split('-');
+  if (y && m && d) {
+    return `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;
+  }
+  // Format inconnu -> ne tente rien
+  return s;
+}
+
 async function apiFetch(method, pathOrParams, opts = {}) {
   if (method !== "GET") throw new Error("apiFetch() n'est utilisé ici que pour GET");
   let query = pathOrParams || "";
@@ -659,17 +674,14 @@ async function initApp() {
 
   async function loadPracticeForm(category, opts = {}) {
     clearFormUI();
-    const loader = document.getElementById("loader");
-    if (loader) loader.classList.remove("hidden");
     console.log(`📡 Chargement des questions pour la catégorie : ${category}`);
 
     try {
-      const raw = await apiFetch("GET", `?mode=practice&category=${encodeURIComponent(category)}`, opts);
+      const raw = await apiFetch("GET", `?mode=practice&category=${encodeURIComponent(category)}`, { ...opts, fresh: true });
       const questions = toQuestions(raw);
       if (!Array.isArray(questions)) {
         console.error("Réponse inattendue (pas un tableau) :", raw);
-        showToast("❌ Format de données inattendu", "red");
-        document.getElementById("loader")?.classList.add("hidden");
+        showToast("❌ Erreur lors du chargement des questions", "red");
         return;
       }
       console.log(`✅ ${questions.length} question(s) de pratique chargée(s).`);
@@ -1327,7 +1339,9 @@ async function initApp() {
     const info = document.createElement("span");
     info.className = "text-xs text-gray-500";
     const infos = [];
-    if (q.scheduleInfo?.nextDate) infos.push(`Prochaine : ${q.scheduleInfo.nextDate}`);
+    const rawNext = q?.scheduleInfo?.nextDate || q?.scheduleInfo?.sr?.due || null;
+    const prettyNext = normalizeFRDate(rawNext);
+    if (prettyNext) infos.push(`Prochaine : ${prettyNext}`);
     if (q.scheduleInfo?.remaining > 0) {
       infos.push(`Revient dans ${q.scheduleInfo.remaining} itération(s)`);
     }
@@ -1757,14 +1771,35 @@ async function initApp() {
     container.innerHTML = "";
     console.log(`✍️ Rendu de ${questions.length} question(s)`);
 
+    // Sécurité : en journalier, on vire la "pratique délibérée"
+    let filteredQuestions = (questions || []);
+    
+    if (appState.mode === 'daily') {
+      const rePratique = /pratique\s*d[ée]lib[ée]r[ée]e/i;
+      filteredQuestions = filteredQuestions.filter(q => !rePratique.test(q?.frequency || ''));
+      
+      // Fallback SR côté front si le back n'a pas marqué "skipped"
+      const iso = appState.selectedDate; // format YYYY-MM-DD
+      if (iso) {
+        filteredQuestions.forEach(q => {
+          const sr = q?.scheduleInfo?.sr;
+          const dueIso = sr?.due;
+          const srOn = sr?.on;
+          if (!q.skipped && srOn && dueIso && iso < dueIso) {
+            q.skipped = true; // on masque aujourd'hui
+          }
+        });
+      }
+    }
+
     // Mémoriser les questions par ID et conserver une copie pour re-render
     appState.qById = new Map((questions||[]).map(q => [String(q.id), q]));
     appState.lastQuestions = questions.slice();
 
     // 1) Séparer visibles / masquées (SR)
     const hiddenSR = [];
-    const visibles  = [];
-    (questions || []).forEach(q => q.skipped ? hiddenSR.push(q) : visibles.push(q));
+    const visibles = [];
+    filteredQuestions.forEach(q => q.skipped ? hiddenSR.push(q) : visibles.push(q));
 
     // 2) Grouper les visibles par priorité
     const groups = { 1: [], 2: [], 3: [] }; // 1=haute,2=moyenne,3=basse
