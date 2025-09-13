@@ -166,6 +166,7 @@ export async function initApp() {
       }
     }
     entries.apiUrl = apiUrl;
+    entries._action = 'save_answers';
 
     console.log("📤 Soumission :", entries);
 
@@ -361,7 +362,7 @@ export async function initApp() {
       bindFieldAutosave(select, q.id);
       inputWrapper.appendChild(select);
       
-    } else if (q.type === "Likert") {
+    } else if (/likert/i.test(q.type || "")) {
       const select = document.createElement("select");
       select.name = q.id;
       select.className = "w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500";

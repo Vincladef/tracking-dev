@@ -121,6 +121,7 @@ export async function createConsigne(payload) {
     frequency: payload.frequency || "pratique délibérée",
     label: payload.label,
     priority: payload.priority,
+    sr: payload.sr ? "on" : "off",
     apiUrl
   };
   const res = await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
@@ -147,6 +148,7 @@ export async function updateConsigne(payload) {
     frequency: payload.frequency,
     label: payload.label,
     priority: payload.priority,
+    sr: payload.sr ? "on" : "off",
     apiUrl
   };
   await fetch(WORKER_URL, {

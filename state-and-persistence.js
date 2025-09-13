@@ -156,11 +156,12 @@ export function queueSoftSave(patchObj, anchorEl) {
 
     const selected = document.getElementById("date-select")?.selectedOptions[0];
     const mode = selected?.dataset.mode || "daily";
-    const body = { 
-      apiUrl, 
-      user, 
+    const body = {
+      apiUrl,
+      user,
       ..._softBuffer,
-      _mode: mode
+      _mode: mode,
+      _action: 'save_answers'
     };
     
     if (mode === "daily") {
@@ -251,7 +252,7 @@ window.addEventListener("beforeunload", () => {
     const selected = document.getElementById("date-select")?.selectedOptions[0];
     if (!selected) return;
     const mode = selected.dataset.mode || "daily";
-    const body = { apiUrl, user, ..._softBuffer };
+    const body = { apiUrl, user, ..._softBuffer, _action: 'save_answers' };
     if (mode === "daily") { body._mode = "daily"; body._date = selected.dataset.date; }
     else { body._mode = "practice"; body._category = selected.dataset.category; }
     body.__txid = `beforeunload_${Date.now()}`;
