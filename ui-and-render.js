@@ -133,6 +133,9 @@ export async function initApp() {
 
   dateSelect.addEventListener("change", handleSelectChange);
 
+  // Chargement initial du premier élément
+  await handleSelectChange();
+
   // ➡️ Soumission du formulaire principal
   document.getElementById("daily-form").addEventListener("submit", async (e) => {
     e.preventDefault();
