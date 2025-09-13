@@ -180,10 +180,9 @@ export async function initApp() {
     } else {
       entries._category = selected.dataset.category; // nom exact
       
-      // Include hidden SR items for practice mode
-      if (appState.__hiddenPracticeSr?.length) {
-        entries.__srIterDec = JSON.stringify(appState.__hiddenPracticeSr);
-        console.log(`[SR] Including ${appState.__hiddenPracticeSr.length} hidden SR items for iteration decrement`);
+      // Décrémente 1 itération pour chaque item SR du mode pratique visible
+      if (appState.__practiceIterDone?.length) {
+        entries.__srIterDec = JSON.stringify(appState.__practiceIterDone);
       }
     }
     entries.apiUrl = apiUrl;
@@ -225,7 +224,7 @@ export async function initApp() {
     
     clearFormUI();
     try {
-      const resp = await apiFetch("GET", `?_date=${dateISO}`, opts);
+      const resp = await apiFetch("GET", `?date=${dateISO}`, opts);
       console.log("📋 Réponse brute du serveur:", resp);
       const questions = toQuestions(resp);
       console.log("📋 Questions après transformation:", questions);
@@ -240,7 +239,6 @@ export async function initApp() {
     } catch (e) {
       console.error("Erreur de chargement :", e);
       showToast("❌ Erreur de chargement", "red");
-      // Dans tous les cas, ne laisse pas le loader à l'écran
       const loader = document.getElementById("loader");
       if (loader) loader.classList.add("hidden");
     }
@@ -260,6 +258,11 @@ export async function initApp() {
       appState.lastQuestions = questions;
       appState.qById = new Map(questions.map(q => [String(q.id), q]));
       
+      // Prépare la liste des items SR actifs pour le décompte d'itération
+      appState.__practiceIterDone = questions
+        .filter(q => q?.scheduleInfo?.sr?.on === true)
+        .map(q => String(q.id));
+
       showFormUI();
       renderQuestions(questions);
       console.log(`✅ ${questions.length} question(s) de pratique chargée(s)`);
