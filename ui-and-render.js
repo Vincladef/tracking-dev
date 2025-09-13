@@ -142,6 +142,18 @@ export async function initApp() {
   // Chargement initial du premier élément
   await handleSelectChange();
 
+  // Quand une consigne change, on raffraîchit la vue en cours (avec fresh)
+  document.addEventListener("consigne:changed", () => {
+    const sel = document.getElementById("date-select")?.selectedOptions?.[0];
+    if (!sel) return;
+    const mode = sel.dataset.mode || "daily";
+    if (mode === "practice") {
+      loadPracticeForm(sel.dataset.category, { fresh: true });
+    } else {
+      loadFormForDate(sel.dataset.date, { fresh: true });
+    }
+  });
+
   // ➡️ Soumission du formulaire principal
   document.getElementById("daily-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -228,6 +240,9 @@ export async function initApp() {
     } catch (e) {
       console.error("Erreur de chargement :", e);
       showToast("❌ Erreur de chargement", "red");
+      // Dans tous les cas, ne laisse pas le loader à l'écran
+      const loader = document.getElementById("loader");
+      if (loader) loader.classList.add("hidden");
     }
   }
 
@@ -251,6 +266,8 @@ export async function initApp() {
     } catch (e) {
       console.error("Erreur de chargement :", e);
       showToast("❌ Erreur de chargement", "red");
+      const loader = document.getElementById("loader");
+      if (loader) loader.classList.add("hidden");
     }
   }
 
@@ -260,12 +277,18 @@ export async function initApp() {
     const submitBtn = document.getElementById("submit-btn");
     if (submitBtn) submitBtn.classList.add("hidden");
     const loader = document.getElementById("loader");
-    if (loader) loader.classList.remove("hidden");   // montrer le loader pendant le fetch
+    if (loader) {
+      loader.classList.remove("hidden");   // montrer le loader pendant le fetch
+      loader.setAttribute("aria-busy","true");
+    }
   }
 
   function showFormUI() {
     const loader = document.getElementById("loader");
-    if (loader) loader.classList.add("hidden");      // cacher le loader quand c'est prêt
+    if (loader) {
+      loader.classList.add("hidden");      // cacher le loader quand c'est prêt
+      loader.removeAttribute("aria-busy");
+    }
     const submitBtn = document.getElementById("submit-btn");
     if (submitBtn) submitBtn.classList.remove("hidden");
   }
@@ -310,10 +333,13 @@ export async function initApp() {
     [1, 2, 3].forEach(priority => {
       if (!groups[priority].length) return;
       
-      const section = document.createElement("div");
+      const section = (priority === 3)
+        ? document.createElement("details")
+        : document.createElement("div");
       section.className = "mb-6";
+      if (priority === 3) section.open = false; // fermé par défaut
       
-      const title = document.createElement("h3");
+      const title = document.createElement(priority === 3 ? "summary" : "h3");
       const colors = { 1: "text-red-700 border-red-500", 2: "text-yellow-700 border-yellow-500", 3: "text-gray-600 border-gray-400" };
       const labels = { 1: "Priorité Haute", 2: "Priorité Moyenne", 3: "Priorité Faible" };
       title.className = `text-lg font-medium mb-3 border-l-4 pl-3 ${colors[priority]}`;
@@ -419,25 +445,77 @@ export async function initApp() {
     const actions = document.createElement('div');
     actions.className = 'mt-2 flex items-center gap-3 text-sm';
 
-    // Historique (ouvre une nouvelle fenêtre ; adapte l'URL à ton endpoint réel)
     const btnHist = document.createElement('button');
     btnHist.type = 'button';
     btnHist.className = 'underline text-gray-600 hover:text-gray-800';
     btnHist.textContent = 'Voir l\'historique';
-    btnHist.onclick = () => {
-      // Si ton Apps Script expose un mode ?mode=history&id=..., adapte ici :
-      const query = `?mode=history&id=${encodeURIComponent(q.id)}&user=${encodeURIComponent(user)}`;
-      const u = new URL(WORKER_URL);
-      u.searchParams.set('apiUrl', apiUrl);
-      u.searchParams.set('query', query);
-      window.open(u.toString(), '_blank');
+    const historyWrap = document.createElement('div');
+    historyWrap.className = 'mt-2 hidden';
+    wrapper.appendChild(historyWrap);
+
+    const colorChip = (val) => {
+      const v = String(val || '').toLowerCase();
+      if (["oui","plutôt oui"].includes(v)) return 'bg-green-100 text-green-800';
+      if (v === "moyen") return 'bg-gray-100 text-gray-800';
+      if (["non","plutôt non"].includes(v)) return 'bg-red-100 text-red-800';
+      return 'bg-gray-100 text-gray-700';
+    };
+    const renderHistory = (items=[]) => {
+      historyWrap.innerHTML = '';
+      if (!items.length) {
+        historyWrap.innerHTML = '<div class="text-xs text-gray-500">Aucune réponse enregistrée.</div>';
+        return;
+      }
+      const ul = document.createElement('ul');
+      ul.className = 'space-y-1';
+      items.forEach(it => {
+        const li = document.createElement('li');
+        li.className = 'text-sm flex items-center gap-2';
+        const chip = document.createElement('span');
+        chip.className = 'px-2 py-0.5 rounded ' + colorChip(it.value);
+        chip.textContent = it.value ?? '';
+        const date = document.createElement('span');
+        date.className = 'text-xs text-gray-500';
+        date.textContent = it.date ?? '';
+        li.append(chip, date);
+        ul.appendChild(li);
+      });
+      historyWrap.appendChild(ul);
+    };
+
+    btnHist.onclick = async () => {
+      // toggle si déjà chargé
+      if (historyWrap.dataset.loaded === '1') {
+        historyWrap.classList.toggle('hidden');
+        return;
+      }
+      historyWrap.classList.remove('hidden');
+      historyWrap.textContent = 'Chargement…';
+      try {
+        const resp = await apiFetch("GET", `?mode=history&id=${encodeURIComponent(q.id)}`, { fresh: true });
+        // On tolère plusieurs formats possibles renvoyés par Apps Script
+        let items = Array.isArray(resp) ? resp
+                  : Array.isArray(resp?.history) ? resp.history
+                  : Array.isArray(resp?.items) ? resp.items
+                  : [];
+        // normalise en {date, value}, et tri du +récent au +ancien
+        items = items.map(it => ({
+          date: it.date || it.when || it.at || it.ts || '',
+          value: it.value ?? it.answer ?? it.val ?? ''
+        })).sort((a,b)=> (new Date(b.date)) - (new Date(a.date)));
+        renderHistory(items);
+        historyWrap.dataset.loaded = '1';
+      } catch(e) {
+        historyWrap.textContent = 'Erreur de chargement de l\'historique.';
+        console.error(e);
+      }
     };
     actions.appendChild(btnHist);
 
     // Modifier
     const btnEdit = document.createElement('button');
     btnEdit.type = 'button';
-    btnEdit.className = 'underline text-blue-700 hover:text-blue-900';
+    btnEdit.className = 'px-2 py-1 border rounded text-gray-700 border-gray-300 hover:bg-gray-50';
     btnEdit.textContent = 'Modifier';
     btnEdit.onclick = () => openConsigneModal(q);
     actions.appendChild(btnEdit);

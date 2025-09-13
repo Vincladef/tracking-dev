@@ -271,7 +271,7 @@ function createConsigneRow(c, borderClass) {
   actions.className = "flex gap-2";
   
   const edit = document.createElement("button");
-  edit.className = "px-2 py-1 text-sm border rounded hover:bg-blue-50 text-blue-700 border-blue-200";
+  edit.className = "px-2 py-1 text-sm border rounded hover:bg-gray-50 text-gray-700 border-gray-300";
   edit.textContent = "Modifier";
   edit.onclick = () => openConsigneModal(c);
   actions.appendChild(edit);
@@ -391,7 +391,8 @@ export async function openConsigneModal(c = null) {
         showToast("✅ Consigne mise à jour");
         closeConsigneModal();
         restore();
-        loadConsignes();
+        document.dispatchEvent(new CustomEvent("consigne:changed", { detail: { op: "update", id: payload.id }}));
+        // loadConsignes(); // facultatif si tu veux aussi raffraîchir le manager
       } else {
         // CREATE
         const { ok, newId } = await createConsigne(payload);
@@ -399,7 +400,8 @@ export async function openConsigneModal(c = null) {
         showToast("✅ Consigne créée");
         closeConsigneModal();
         restore();
-        loadConsignes();
+        document.dispatchEvent(new CustomEvent("consigne:changed", { detail: { op: "create", id: newId }}));
+        // loadConsignes(); // facultatif si tu veux aussi raffraîchir le manager
       }
     } catch (err) {
       console.error(err);
