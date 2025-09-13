@@ -104,6 +104,12 @@ export async function initApp() {
 
   await buildCombinedSelect();
 
+  // sélectionner la 1ʳᵉ date (aujourd'hui) par défaut
+  const firstDate = document
+    .getElementById("date-select")
+    ?.querySelector('optgroup[label^="Dates"] option');
+  if (firstDate) firstDate.selected = true;
+
   // ➡️ Gestionnaire de changement
   async function handleSelectChange() {
     const selected = dateSelect.selectedOptions[0];
@@ -371,19 +377,24 @@ export async function initApp() {
       const select = document.createElement("select");
       select.name = q.id;
       select.className = "w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
-      
-      const defaultOpt = document.createElement("option");
-      defaultOpt.value = "";
-      defaultOpt.textContent = "Évaluer...";
-      select.appendChild(defaultOpt);
-      
-      for (let i = 1; i <= 10; i++) {
+
+      const choices = [
+        ["", "Évaluer…"],
+        ["Non", "Non"],
+        ["Plutôt non", "Plutôt non"],
+        ["Moyen", "Moyen"],
+        ["Plutôt bien", "Plutôt bien"],
+        ["Bien", "Bien"],
+        ["Pas de réponse", "Pas de réponse"]
+      ];
+
+      for (const [value, label] of choices) {
         const opt = document.createElement("option");
-        opt.value = i;
-        opt.textContent = i;
+        opt.value = value;
+        opt.textContent = label;
         select.appendChild(opt);
       }
-      
+
       if (q.value) select.value = q.value;
       bindFieldAutosave(select, q.id);
       inputWrapper.appendChild(select);
@@ -401,7 +412,7 @@ export async function initApp() {
 
     wrapper.appendChild(inputWrapper);
 
-    // SR Toggle inline
+    // SR Toggle inline seulement
     addInlineSRToggle(wrapper, q);
 
     // Barre d'actions sous la question
