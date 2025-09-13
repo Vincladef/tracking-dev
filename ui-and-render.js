@@ -1,5 +1,5 @@
 import {
-  apiUrl, user, apiFetch, postWithBackoff, postWithRetry,
+  apiUrl, user, apiFetch, postWithBackoff, postWithRetry, WORKER_URL,
   showToast, flashSaved, normalizeFRDate, toISODate, toQuestions, isAnswerKey, canonicalizeLikert
 } from './core-api-and-utils.js';
 import {
@@ -7,7 +7,7 @@ import {
   queueSoftSave, flushSoftSaveNow, bindFieldAutosave
 } from './state-and-persistence.js';
 import {
-  openConsigneModal, loadConsignes, enableDnD, getAllCategories
+  openConsigneModal, loadConsignes, enableDnD, getAllCategories, deleteConsigne
 } from './consignes-and-dnd.js';
 
 export async function initApp() {
@@ -399,8 +399,53 @@ export async function initApp() {
     // SR Toggle inline
     addInlineSRToggle(wrapper, q);
 
-    // Délai UI
-    addDelayUI(wrapper, q);
+    // Barre d'actions sous la question
+    const actions = document.createElement('div');
+    actions.className = 'mt-2 flex items-center gap-3 text-sm';
+
+    // Historique (ouvre une nouvelle fenêtre ; adapte l'URL à ton endpoint réel)
+    const btnHist = document.createElement('button');
+    btnHist.type = 'button';
+    btnHist.className = 'underline text-gray-600 hover:text-gray-800';
+    btnHist.textContent = 'Voir l\'historique';
+    btnHist.onclick = () => {
+      // Si ton Apps Script expose un mode ?mode=history&id=..., adapte ici :
+      const query = `?mode=history&id=${encodeURIComponent(q.id)}&user=${encodeURIComponent(user)}`;
+      const u = new URL(WORKER_URL);
+      u.searchParams.set('apiUrl', apiUrl);
+      u.searchParams.set('query', query);
+      window.open(u.toString(), '_blank');
+    };
+    actions.appendChild(btnHist);
+
+    // Modifier
+    const btnEdit = document.createElement('button');
+    btnEdit.type = 'button';
+    btnEdit.className = 'underline text-blue-700 hover:text-blue-900';
+    btnEdit.textContent = 'Modifier';
+    btnEdit.onclick = () => openConsigneModal(q);
+    actions.appendChild(btnEdit);
+
+    // Supprimer
+    const btnDel = document.createElement('button');
+    btnDel.type = 'button';
+    btnDel.className = 'underline text-red-700 hover:text-red-900';
+    btnDel.textContent = 'Supprimer';
+    btnDel.onclick = async () => {
+      if (!confirm('Supprimer définitivement cette consigne ?')) return;
+      await deleteConsigne(q.id);          // côté backend
+      showToast('🗑️ Supprimée');
+      // Recharge la vue actuelle
+      const sel = document.getElementById('date-select')?.selectedOptions[0];
+      if (sel?.dataset.mode === 'practice') {
+        loadPracticeForm(sel.dataset.category, { fresh: true });
+      } else {
+        loadFormForDate(sel.dataset.date, { fresh: true });
+      }
+    };
+    actions.appendChild(btnDel);
+
+    wrapper.appendChild(actions);
 
     return wrapper;
   }
@@ -555,5 +600,5 @@ export async function initApp() {
   });
 
   // Load consignes manager
-  loadConsignes().catch(console.error);
+  // loadConsignes().catch(console.error);
 }
