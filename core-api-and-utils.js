@@ -195,6 +195,10 @@ export function toQuestions(raw) {
     }
     try { return toQuestions(JSON.parse(txt)); } catch { return null; }
   }
+  // Si le serveur renvoie {ok: true} sans questions, retourner un tableau vide
+  if (raw && typeof raw === "object" && raw.ok === true) {
+    return [];
+  }
   return null;
 }
 
