@@ -234,11 +234,6 @@ export function bindFieldAutosave(inputEl, qid) {
     inputEl.addEventListener("touchend", () => setTimeout(pushIfChanged, 0), { passive: true });
   } else if (inputEl.tagName === "TEXTAREA") {
     const push = () => queueSoftSave({ [qid]: inputEl.value }, inputEl);
-    let t;
-    inputEl.addEventListener("input", () => {
-      clearTimeout(t);
-      t = setTimeout(push, 700); // petit debounce
-    });
     inputEl.addEventListener("blur",   push);
     inputEl.addEventListener("change", push);
   } else if (inputEl.type === "text") {
