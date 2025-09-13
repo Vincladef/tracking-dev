@@ -208,7 +208,9 @@ export async function initApp() {
     clearFormUI();
     try {
       const resp = await apiFetch("GET", `?_date=${dateISO}`, opts);
+      console.log("📋 Réponse brute du serveur:", resp);
       const questions = toQuestions(resp);
+      console.log("📋 Questions après transformation:", questions);
       if (!questions) throw new Error("Format de réponse inattendu");
       
       appState.lastQuestions = questions;
