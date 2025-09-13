@@ -6,7 +6,10 @@
   <link rel="icon" href="data:,">
   <title>Formulaire du jour</title>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
-  <script defer src="script.js"></script>
+  <script type="module">
+    import { initApp } from './ui-and-render.js';
+    initApp();
+  </script>
 </head>
 <body class="bg-gray-100">
 
@@ -33,15 +36,18 @@
       Chargement des questions en cours...
     </div>
 
-    <form id="daily-form" class="space-y-6 hidden">
-      </form>
+    <form id="daily-form" class="space-y-6">
+      <div id="questions-container"></div>
+      
+      <div class="mt-8 text-center">
+        <button id="submit-btn" type="submit"
+          class="px-6 py-3 rounded-lg border border-green-200 bg-green-100 text-green-800 hover:bg-green-200 hover:border-green-300 transition hidden">
+          ✅ Envoyer mes réponses
+        </button>
+      </div>
+    </form>
 
-    <div id="submit-section" class="mt-8 text-center hidden">
-      <button id="submitBtn"
-        class="px-6 py-3 rounded-lg border border-green-200 bg-green-100 text-green-800 hover:bg-green-200 hover:border-green-300 transition">
-        ✅ Envoyer mes réponses
-      </button>
-    </div>
+    <div id="consignes-list" class="mt-8 space-y-4"></div>
   </div>
 
   <!-- MODAL -->
