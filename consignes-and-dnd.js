@@ -121,6 +121,7 @@ export async function createConsigne(payload) {
     frequency: payload.frequency || "pratique délibérée",
     label: payload.label,
     priority: payload.priority,
+    sr: payload.sr ? "on" : "off",
     apiUrl
   };
   const res = await fetch(WORKER_URL, { method: "POST", body: JSON.stringify(body) });
@@ -147,6 +148,7 @@ export async function updateConsigne(payload) {
     frequency: payload.frequency,
     label: payload.label,
     priority: payload.priority,
+    sr: payload.sr ? "on" : "off",
     apiUrl
   };
   await fetch(WORKER_URL, {
@@ -365,11 +367,13 @@ export async function openConsigneModal(c = null) {
     isSubmitting = true;
     
     const daily = form.querySelector('[name="modeConsigne"][value="daily"]')?.checked !== false;
+    let typeSel = form.elements.type.value;
+    if (/likert/i.test(typeSel)) typeSel = "Likert";
     const payload = {
       id: form.elements.id.value || null,
       label: form.elements.label.value.trim(),
       category: (document.getElementById("consigne-category")?.value || "").trim(),
-      type: form.elements.type.value,
+      type: typeSel,
       priority: parseInt(form.elements.priority.value || "2", 10),
       frequency: daily ? (readFreqMulti(document.getElementById("freq-multi")) || "Quotidien") : "pratique délibérée",
       sr: getSR() // Include SR state in payload
