@@ -10,6 +10,32 @@ import {
   openConsigneModal, loadConsignes, enableDnD, getAllCategories, deleteConsigne
 } from './consignes-and-dnd.js';
 
+async function fetchHistory(qid) {
+  // essaie plusieurs endpoints backend plausibles
+  const tries = [
+    `?mode=history&id=${encodeURIComponent(qid)}`,
+    `?history=1&id=${encodeURIComponent(qid)}`,
+    `?mode=history&qid=${encodeURIComponent(qid)}`,
+    `?mode=history&questionId=${encodeURIComponent(qid)}`
+  ];
+  for (const qs of tries) {
+    try {
+      const r = await apiFetch("GET", qs, { fresh: true });
+      if (r != null) return r;
+    } catch (e) { /* continue */ }
+  }
+  // Dernier fallback : POST direct (Cloudflare Worker forwarde tel quel)
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ _action: "history", user, id: qid, apiUrl })
+    });
+    if (res.ok) return await res.json();
+  } catch (e) {}
+  throw new Error("history_fetch_failed");
+}
+
 export async function initApp() {
   // Validation utilisateur
   if (!user) {
@@ -224,7 +250,7 @@ export async function initApp() {
     
     clearFormUI();
     try {
-      const resp = await apiFetch("GET", `?date=${dateISO}`, opts);
+      const resp = await apiFetch("GET", `?_date=${dateISO}`, opts);
       console.log("📋 Réponse brute du serveur:", resp);
       const questions = toQuestions(resp);
       console.log("📋 Questions après transformation:", questions);
@@ -487,30 +513,45 @@ export async function initApp() {
     };
 
     btnHist.onclick = async () => {
-      // toggle si déjà chargé
       if (historyWrap.dataset.loaded === '1') {
         historyWrap.classList.toggle('hidden');
         return;
       }
       historyWrap.classList.remove('hidden');
       historyWrap.textContent = 'Chargement…';
+
       try {
-        const resp = await apiFetch("GET", `?mode=history&id=${encodeURIComponent(q.id)}`, { fresh: true });
-        // On tolère plusieurs formats possibles renvoyés par Apps Script
-        let items = Array.isArray(resp) ? resp
-                  : Array.isArray(resp?.history) ? resp.history
-                  : Array.isArray(resp?.items) ? resp.items
-                  : [];
-        // normalise en {date, value}, et tri du +récent au +ancien
-        items = items.map(it => ({
-          date: it.date || it.when || it.at || it.ts || '',
-          value: it.value ?? it.answer ?? it.val ?? ''
-        })).sort((a,b)=> (new Date(b.date)) - (new Date(a.date)));
+        const raw = await fetchHistory(q.id);
+
+        // accepte plein de formes différentes
+        let arr = Array.isArray(raw) ? raw
+                : Array.isArray(raw.history) ? raw.history
+                : Array.isArray(raw.items) ? raw.items
+                : Array.isArray(raw.rows) ? raw.rows
+                : Array.isArray(raw.data) ? raw.data
+                : [];
+
+        const items = arr.map(it => {
+          const d = it.date ?? it.when ?? it.at ?? it.ts ?? it.timestamp ?? it.day ?? it.d ?? it.Date ?? it.createdAt ?? it.created_at ?? '';
+          const v = it.value ?? it.answer ?? it.val ?? it.response ?? it.text ?? it.content ?? it.Value ?? '';
+          return { date: String(d), value: String(v) };
+        });
+
+        // tri du + récent au + ancien (supporte ISO ou dd/MM/yyyy)
+        items.sort((a, b) => {
+          const ia = toISODate(a.date) || a.date;
+          const ib = toISODate(b.date) || b.date;
+          const da = Date.parse(ia);
+          const db = Date.parse(ib);
+          if (Number.isNaN(da) || Number.isNaN(db)) return 0;
+          return db - da;
+        });
+
         renderHistory(items);
         historyWrap.dataset.loaded = '1';
-      } catch(e) {
-        historyWrap.textContent = 'Erreur de chargement de l\'historique.';
+      } catch (e) {
         console.error(e);
+        historyWrap.textContent = 'Erreur de chargement de l\'historique.';
       }
     };
     actions.appendChild(btnHist);
