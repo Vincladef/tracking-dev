@@ -259,9 +259,13 @@ export async function initApp() {
     if (container) container.innerHTML = "";
     const submitBtn = document.getElementById("submit-btn");
     if (submitBtn) submitBtn.classList.add("hidden");
+    const loader = document.getElementById("loader");
+    if (loader) loader.classList.remove("hidden");   // montrer le loader pendant le fetch
   }
 
   function showFormUI() {
+    const loader = document.getElementById("loader");
+    if (loader) loader.classList.add("hidden");      // cacher le loader quand c'est prêt
     const submitBtn = document.getElementById("submit-btn");
     if (submitBtn) submitBtn.classList.remove("hidden");
   }
@@ -377,24 +381,20 @@ export async function initApp() {
       const select = document.createElement("select");
       select.name = q.id;
       select.className = "w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
-
       const choices = [
-        ["", "Évaluer…"],
+        ["", "Pas de réponse"],     // valeur vide = "pas de réponse"
         ["Non", "Non"],
         ["Plutôt non", "Plutôt non"],
         ["Moyen", "Moyen"],
-        ["Plutôt bien", "Plutôt bien"],
-        ["Bien", "Bien"],
-        ["Pas de réponse", "Pas de réponse"]
+        ["Plutôt oui", "Plutôt oui"],
+        ["Oui", "Oui"]
       ];
-
-      for (const [value, label] of choices) {
+      for (const [val, label] of choices) {
         const opt = document.createElement("option");
-        opt.value = value;
+        opt.value = val;
         opt.textContent = label;
         select.appendChild(opt);
       }
-
       if (q.value) select.value = q.value;
       bindFieldAutosave(select, q.id);
       inputWrapper.appendChild(select);
